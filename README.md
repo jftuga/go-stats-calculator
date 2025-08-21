@@ -1,7 +1,3 @@
-Of course. Here is a comprehensive `README.md` file for the Go statistics program. It covers the purpose, features, installation, usage, and a detailed explanation of the output.
-
----
-
 # Go Stats Calculator
 
 A robust, command-line tool written in Go to compute a comprehensive set of descriptive statistics from a list of numbers. It can read data from a file or directly from standard input, making it a flexible utility for data analysis in any shell environment.
