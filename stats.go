@@ -158,7 +158,7 @@ func computeStats(data []float64) (*Stats, error) {
 	}
 
 	var modes []float64
-	maxFreq := 1 // Start at 1, so if no value repeats, we get an empty slice.
+	maxFreq := 0 // Start at 0 to correctly find the max frequency
 	for val, freq := range freqs {
 		if freq > maxFreq {
 			maxFreq = freq
@@ -167,8 +167,14 @@ func computeStats(data []float64) (*Stats, error) {
 			modes = append(modes, val) // Found another mode
 		}
 	}
-	stats.Mode = modes
-	sort.Float64s(stats.Mode) // For consistent output
+
+	// If the max frequency is 1, it means no number repeated, so there is no mode.
+	if maxFreq <= 1 {
+		stats.Mode = []float64{} // Return an empty slice
+	} else {
+		stats.Mode = modes
+		sort.Float64s(stats.Mode) // For consistent output
+	}
 
 	// --- Outliers (using the 1.5 * IQR rule) ---
 	lowerBound := stats.Q1 - 1.5*stats.IQR
@@ -252,11 +258,18 @@ func printStats(s *Stats) {
 	fmt.Println("\n--- Measures of Central Tendency ---")
 	fmt.Printf("Mean:           %.4f\n", s.Mean)
 	fmt.Printf("Median (p50):   %.4f\n", s.Median)
-	if len(s.Mode) > 0 {
-		fmt.Printf("Mode:           %v\n", s.Mode)
-	} else {
+
+	switch len(s.Mode) {
+	case 0:
 		fmt.Println("Mode:           None")
+	case 1:
+		// If there's only one mode, print it as a clean number.
+		fmt.Printf("Mode:           %.4f\n", s.Mode[0])
+	default:
+		// If there are multiple modes, label it and print the slice.
+		fmt.Printf("Mode (multi):   %v\n", s.Mode)
 	}
+
 	fmt.Println("\n--- Measures of Spread & Distribution ---")
 	fmt.Printf("Std Deviation:  %.4f\n", s.StdDev)
 	fmt.Printf("Variance:       %.4f\n", s.Variance)
