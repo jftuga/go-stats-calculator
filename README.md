@@ -120,7 +120,7 @@ Max:            38.9500
 --- Measures of Central Tendency ---
 Mean:           20.7300
 Median (p50):   18.9200
-Mode:           [15.05]
+Mode:           15.05
 
 --- Measures of Spread & Distribution ---
 Std Deviation:  7.4605
