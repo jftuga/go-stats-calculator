@@ -15,6 +15,7 @@ import (
 // Stats holds the computed statistical results.
 type Stats struct {
 	Count    int
+	Sum      float64
 	Mean     float64
 	Median   float64
 	Mode     []float64 // A dataset can have more than one mode
@@ -130,6 +131,7 @@ func computeStats(data []float64) (*Stats, error) {
 	for _, v := range data {
 		sum += v
 	}
+	stats.Sum = sum
 	stats.Mean = sum / float64(count)
 
 	// --- Variance and Standard Deviation ---
@@ -253,6 +255,7 @@ func interpretSkewness(s float64) string {
 func printStats(s *Stats) {
 	fmt.Println("--- Descriptive Statistics ---")
 	fmt.Printf("Count:          %d\n", s.Count)
+	fmt.Printf("Sum:            %.4f\n", s.Sum)
 	fmt.Printf("Min:            %.4f\n", s.Min)
 	fmt.Printf("Max:            %.4f\n", s.Max)
 	fmt.Println("\n--- Measures of Central Tendency ---")
