@@ -114,21 +114,22 @@ Running the command `./stats sample_data.txt` will produce the following output:
 ```
 --- Descriptive Statistics ---
 Count:          15
+Sum:            310.9500
 Min:            13.9900
 Max:            38.9500
 
 --- Measures of Central Tendency ---
 Mean:           20.7300
 Median (p50):   18.9200
-Mode:           15.05
+Mode:           15.0500
 
 --- Measures of Spread & Distribution ---
 Std Deviation:  7.4605
-Variance:       55.6591
+Variance:       55.6597
 Quartile 1 (p25): 15.7350
 Quartile 3 (p75): 21.7650
 IQR:            6.0300
-Skewness:       1.1356 (Highly Right Skewed)
+Skewness:       1.6862 (Highly Right Skewed)
 Outliers:       [35.88 38.95]
 ```
 
