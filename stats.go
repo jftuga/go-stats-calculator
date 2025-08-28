@@ -3,6 +3,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"math"
@@ -11,6 +12,10 @@ import (
 	"strconv"
 	"strings"
 )
+
+const PgmName string = "stats"
+const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
+const PgmVersion string = "0.1.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
@@ -31,7 +36,15 @@ type Stats struct {
 }
 
 func main() {
-	if len(os.Args) < 2 {
+	version := flag.Bool("v", false, "show version")
+	flag.Parse()
+
+	if *version {
+		fmt.Printf("%s version %s\n%s\n", PgmName, PgmVersion, PgmUrl)
+		os.Exit(0)
+	}
+	args := flag.Args()
+	if len(args) < 1 {
 		fmt.Fprintf(
 			os.Stderr,
 			"Usage:\n  %s <filename>\n  %s -\n",
@@ -50,7 +63,7 @@ func main() {
 	}
 
 	var reader io.Reader
-	arg := os.Args[1]
+	arg := args[0]
 
 	if arg == "-" {
 		reader = os.Stdin
