@@ -18,7 +18,7 @@ import (
 const PgmName string = "stats"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
-const PgmVersion string = "0.3.0"
+const PgmVersion string = "0.4.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
@@ -245,6 +245,29 @@ func calculateSkewness(data []float64, mean, stdDev float64) float64 {
 	return (n / ((n - 1) * (n - 2))) * (sumOfCubedDeviations / math.Pow(stdDev, 3))
 }
 
+// formatFloat formats a float64 without scientific notation, trimming unnecessary trailing zeros.
+func formatFloat(v float64) string {
+	if v == math.Trunc(v) {
+		return strconv.FormatFloat(v, 'f', 0, 64)
+	}
+	s := strconv.FormatFloat(v, 'f', 4, 64)
+	s = strings.TrimRight(s, "0")
+	s = strings.TrimSuffix(s, ".")
+	return s
+}
+
+// formatFloatSlice formats a slice of float64 values without scientific notation.
+func formatFloatSlice(values []float64) string {
+	if len(values) == 0 {
+		return "[]"
+	}
+	parts := make([]string, len(values))
+	for i, v := range values {
+		parts[i] = formatFloat(v)
+	}
+	return "[" + strings.Join(parts, " ") + "]"
+}
+
 // interpretSkewness provides a human-readable label for a skewness value.
 func interpretSkewness(s float64) string {
 	absS := math.Abs(s)
@@ -267,35 +290,35 @@ func interpretSkewness(s float64) string {
 func printStats(s *Stats) {
 	fmt.Println("--- Descriptive Statistics ---")
 	fmt.Printf("Count:          %d\n", s.Count)
-	fmt.Printf("Sum:            %.4f\n", s.Sum)
-	fmt.Printf("Min:            %.4f\n", s.Min)
-	fmt.Printf("Max:            %.4f\n", s.Max)
+	fmt.Printf("Sum:            %s\n", formatFloat(s.Sum))
+	fmt.Printf("Min:            %s\n", formatFloat(s.Min))
+	fmt.Printf("Max:            %s\n", formatFloat(s.Max))
 	fmt.Println("\n--- Measures of Central Tendency ---")
-	fmt.Printf("Mean:           %.4f\n", s.Mean)
-	fmt.Printf("Median (p50):   %.4f\n", s.Median)
+	fmt.Printf("Mean:           %s\n", formatFloat(s.Mean))
+	fmt.Printf("Median (p50):   %s\n", formatFloat(s.Median))
 
 	switch len(s.Mode) {
 	case 0:
 		fmt.Println("Mode:           None")
 	case 1:
 		// If there's only one mode, print it as a clean number.
-		fmt.Printf("Mode:           %.4f\n", s.Mode[0])
+		fmt.Printf("Mode:           %s\n", formatFloat(s.Mode[0]))
 	default:
 		// If there are multiple modes, label it and print the slice.
-		fmt.Printf("Mode (multi):   %v\n", s.Mode)
+		fmt.Printf("Mode (multi):   %s\n", formatFloatSlice(s.Mode))
 	}
 
 	fmt.Println("\n--- Measures of Spread & Distribution ---")
-	fmt.Printf("Std Deviation:  %.4f\n", s.StdDev)
-	fmt.Printf("Variance:       %.4f\n", s.Variance)
-	fmt.Printf("Quartile 1 (p25): %.4f\n", s.Q1)
-	fmt.Printf("Quartile 3 (p75): %.4f\n", s.Q3)
-	fmt.Printf("Percentile (p95): %.4f\n", s.P95)
-	fmt.Printf("Percentile (p99): %.4f\n", s.P99)
-	fmt.Printf("IQR:            %.4f\n", s.IQR)
-	fmt.Printf("Skewness:       %.4f (%s)\n", s.Skewness, interpretSkewness(s.Skewness))
+	fmt.Printf("Std Deviation:  %s\n", formatFloat(s.StdDev))
+	fmt.Printf("Variance:       %s\n", formatFloat(s.Variance))
+	fmt.Printf("Quartile 1 (p25): %s\n", formatFloat(s.Q1))
+	fmt.Printf("Quartile 3 (p75): %s\n", formatFloat(s.Q3))
+	fmt.Printf("Percentile (p95): %s\n", formatFloat(s.P95))
+	fmt.Printf("Percentile (p99): %s\n", formatFloat(s.P99))
+	fmt.Printf("IQR:            %s\n", formatFloat(s.IQR))
+	fmt.Printf("Skewness:       %s (%s)\n", formatFloat(s.Skewness), interpretSkewness(s.Skewness))
 	if len(s.Outliers) > 0 {
-		fmt.Printf("Outliers:       %v\n", s.Outliers)
+		fmt.Printf("Outliers:       %s\n", formatFloatSlice(s.Outliers))
 	} else {
 		fmt.Println("Outliers:       None")
 	}
