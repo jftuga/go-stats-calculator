@@ -8,7 +8,7 @@ This program takes a simple, newline-delimited list of numbers (integers or floa
 
 ## Disclaimer
 
-This program was 100% vibe-coded by Gemini 2.5 Pro. As such, the author can't be held responsible for incorrect calculations. Please verify the results for any critical applications.
+This program was vibe-coded by `Gemini 2.5` Pro and `Opus 4.5`. As such, the author can't be held responsible for incorrect calculations. Please verify the results for any critical applications.
 
 ## Features
 
@@ -158,3 +158,44 @@ Outliers:       [35.88 38.95]
 | **IQR**           | The Interquartile Range (`Q3 - Q1`). It represents the middle 50% of the data and is a robust measure of spread.                                                           |
 | **Skewness**      | A measure of asymmetry. A value near 0 is symmetrical. A positive value indicates a "right skew" (a long tail of high values). A negative value indicates a "left skew".   |
 | **Outliers**      | Values that fall outside the range of `Q1 - 1.5*IQR` and `Q3 + 1.5*IQR`. These are statistically unusual data points.                                                      |
+
+## Testing and Correctness
+
+The program includes two layers of verification:
+
+### Unit Tests (`stats_test.go`)
+
+Standard Go unit tests cover the core statistical functions:
+
+- `computeStats` - verifies all computed statistics against a 31-number dataset
+- `calculatePercentile` - tests percentile interpolation at various points (p0, p25, p50, p75, p100)
+- `calculateSkewness` - validates skewness calculations for symmetric and skewed distributions
+
+Run the tests with:
+```bash
+go test -v
+```
+
+### Independent Verification (`verify_stats.sh`)
+
+A shell script independently calculates statistics using `bc` (arbitrary precision calculator) and compares the results against the program's output. This provides external validation that the Go implementation produces correct results.
+
+The script was developed and tested on macOS Sequoia 15.7.3 using:
+- `bc` - arbitrary precision calculator for sum, mean, variance, standard deviation, and percentile calculations
+- `sort` - for ordering the dataset to verify percentile indices
+
+Run the verification with:
+```bash
+./verify_stats.sh
+```
+
+The script exits with code 0 if all values match, or code 1 if any discrepancies are found.
+
+### Test Data Characteristics
+
+The test dataset consists of 31 numbers designed to exercise common scenarios:
+- A mix of integers, decimals, and numbers with trailing zeros (e.g., `25.00`, `35.0`)
+- Repeated values to produce a defined mode
+- An outlier value to verify outlier detection
+
+The tests focus on typical usage patterns and do not cover exotic edge cases, extreme values, or adversarial inputs. Users requiring high-assurance results for critical applications should perform additional validation appropriate to their use case.

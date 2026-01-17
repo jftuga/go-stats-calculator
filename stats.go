@@ -16,9 +16,11 @@ import (
 )
 
 const PgmName string = "stats"
-const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
-const PgmVersion string = "0.4.0"
+const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
+const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
+
+const PgmVersion string = "1.0.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
@@ -45,7 +47,7 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("%s version %s\n%s\n\n%s\n", PgmName, PgmVersion, PgmUrl, PgmDisclaimer)
+		fmt.Printf("%s version %s\n%s\n\n%s\n%s\n", PgmName, PgmVersion, PgmUrl, PgmDisclaimer, PgmSeeAlso)
 		os.Exit(0)
 	}
 	args := flag.Args()
