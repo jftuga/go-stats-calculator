@@ -29,18 +29,16 @@ The calculator computes the following statistics:
 
 ## Installation
 
-To use this program, you need to have Go installed on your system.
+### Homebrew (MacOS / Linux):
 
-1.  **Clone the repository** (or save the `stats.go` file to a new directory):
+* `brew tap jftuga/homebrew-tap; brew update; brew install jftuga/tap/stats`
+
+### Source
+
+* Clone the repository and build:
     ```bash
-    # Example using git
-    git clone https://github.com/your-username/go-stats-calculator.git
+    git clone https://github.com/jftuga/go-stats-calculator.git
     cd go-stats-calculator
-    ```
-
-2.  **Build the executable:**
-    ```bash
-    # This creates an executable file named 'stats' in the current directory
     go build -ldflags="-s -w" -o stats stats.go
     ```
 
