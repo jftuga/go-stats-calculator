@@ -8,7 +8,7 @@ This program takes a simple, newline-delimited list of numbers (integers or floa
 
 ## Disclaimer
 
-This program was vibe-coded by `Gemini 2.5` Pro and `Opus 4.5`. As such, the author can't be held responsible for incorrect calculations. Please verify the results for any critical applications.
+This program was vibe-coded by `Gemini 2.5` Pro and `Opus 4.5`. As such, the author can't be held responsible for incorrect calculations. Please verify the results for any critical applications. That said, it has been validated through unit tests and independent verification. See [Testing and Correctness](#testing-and-correctness) for details.
 
 ## Features
 
