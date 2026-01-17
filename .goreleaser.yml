@@ -2,7 +2,9 @@ version: 2
 
 before:
   hooks:
+    - go test
     - go mod tidy
+    - ./verify_stats.sh
 
 builds:
   - id: stats
