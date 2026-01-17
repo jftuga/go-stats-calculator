@@ -15,7 +15,7 @@ import (
 
 const PgmName string = "stats"
 const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
-const PgmVersion string = "0.1.0"
+const PgmVersion string = "0.2.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
@@ -30,6 +30,8 @@ type Stats struct {
 	Variance float64 // Variance = StdDev^2
 	Q1       float64 // 1st Quartile (25th percentile)
 	Q3       float64 // 3rd Quartile (75th percentile)
+	P95      float64 // 95th percentile
+	P99      float64 // 99th percentile
 	IQR      float64 // Interquartile Range (Q3 - Q1)
 	Outliers []float64
 	Skewness float64 // Formal skewness value
@@ -158,10 +160,12 @@ func computeStats(data []float64) (*Stats, error) {
 		stats.StdDev = math.Sqrt(stats.Variance)
 	}
 
-	// --- Median, Q1, Q3 (Percentiles) ---
+	// --- Median, Q1, Q3, P95, P99 (Percentiles) ---
 	stats.Median = calculatePercentile(sortedData, 0.50)
 	stats.Q1 = calculatePercentile(sortedData, 0.25)
 	stats.Q3 = calculatePercentile(sortedData, 0.75)
+	stats.P95 = calculatePercentile(sortedData, 0.95)
+	stats.P99 = calculatePercentile(sortedData, 0.99)
 
 	// --- IQR ---
 	stats.IQR = stats.Q3 - stats.Q1
@@ -291,6 +295,8 @@ func printStats(s *Stats) {
 	fmt.Printf("Variance:       %.4f\n", s.Variance)
 	fmt.Printf("Quartile 1 (p25): %.4f\n", s.Q1)
 	fmt.Printf("Quartile 3 (p75): %.4f\n", s.Q3)
+	fmt.Printf("Percentile (p95): %.4f\n", s.P95)
+	fmt.Printf("Percentile (p99): %.4f\n", s.P99)
 	fmt.Printf("IQR:            %.4f\n", s.IQR)
 	fmt.Printf("Skewness:       %.4f (%s)\n", s.Skewness, interpretSkewness(s.Skewness))
 	if len(s.Outliers) > 0 {
