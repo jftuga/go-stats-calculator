@@ -189,7 +189,7 @@ Run the verification with:
 ./verify_stats.sh
 ```
 
-The script exits with code 0 if all values match, or code 1 if any discrepancies are found.
+The script exits with code `0` if all values match, or code `1` if any discrepancies are found.
 
 ### Test Data Characteristics
 
@@ -200,8 +200,18 @@ The test dataset consists of 31 numbers designed to exercise common scenarios:
 
 The tests focus on typical usage patterns and do not cover exotic edge cases, extreme values, or adversarial inputs. Users requiring high-assurance results for critical applications should perform additional validation appropriate to their use case.
 
-## Disclosure Notification
+## Personal Project Disclosure
 
-This program is my own original idea and was completely developed
-on my own personal time, for my own personal benefit, and on my
-personally owned equipment.
+This program is my own original idea, conceived and developed entirely:
+
+* On my own personal time, outside of work hours
+* For my own personal benefit and use
+* On my personally owned equipment
+* Without using any employer resources, proprietary information, or trade secrets
+* Without any connection to my employer's business, products, or services
+* Independent of any duties or responsibilities of my employment
+
+This project does not relate to my employer's actual or demonstrably
+anticipated research, development, or business activities. No
+confidential or proprietary information from any employer was used
+in its creation.
