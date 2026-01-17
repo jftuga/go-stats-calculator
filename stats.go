@@ -11,11 +11,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 const PgmName string = "stats"
+const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
-const PgmVersion string = "0.2.0"
+const PgmVersion string = "0.3.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
@@ -42,35 +45,27 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("%s version %s\n%s\n", PgmName, PgmVersion, PgmUrl)
+		fmt.Printf("%s version %s\n%s\n\n%s\n", PgmName, PgmVersion, PgmUrl, PgmDisclaimer)
 		os.Exit(0)
 	}
 	args := flag.Args()
-	if len(args) < 1 {
-		fmt.Fprintf(
-			os.Stderr,
-			"Usage:\n  %s <filename>\n  %s -\n",
-			os.Args[0],
-			os.Args[0],
-		)
-		fmt.Fprintf(
-			os.Stderr,
-			"Description:\n  Computes statistics from a list of numbers.\n",
-		)
-		fmt.Fprintf(
-			os.Stderr,
-			"  Provide a filename or use '-' to read from standard input.\n",
-		)
+	// Determine whether stdin is a terminal
+	inputIsTerminal := term.IsTerminal(int(os.Stdin.Fd()))
+
+	if len(args) < 1 && inputIsTerminal {
+		fmt.Fprintf(os.Stderr, "Usage:\n  %s <filename>\n  %s -\n", os.Args[0], os.Args[0])
+		fmt.Fprintln(os.Stderr, "Description:\n  Computes statistics from a list of numbers.")
+		fmt.Fprintln(os.Stderr, "  Provide a filename or use '-' to read from standard input.")
 		os.Exit(1)
 	}
 
 	var reader io.Reader
-	arg := args[0]
 
-	if arg == "-" {
+	if len(args) == 0 || args[0] == "-" {
+		// No args with piped input, or explicit "-" flag
 		reader = os.Stdin
 	} else {
-		file, err := os.Open(arg)
+		file, err := os.Open(args[0])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error opening file: %v\n", err)
 			os.Exit(1)

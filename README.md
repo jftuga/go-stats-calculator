@@ -22,6 +22,7 @@ The calculator computes the following statistics:
 -   **Standard Deviation**: A measure of the amount of variation or dispersion.
 -   **Variance**: The square of the standard deviation.
 -   **Quartiles (Q1, Q3)**: The 25th (p25) and 75th (p75) percentiles.
+-   **Percentiles (p95, p99)**: The 95th and 99th percentiles, useful for understanding tail distributions.
 -   **Interquartile Range (IQR)**: The range between the first and third quartiles (Q3 - Q1).
 -   **Skewness**: A formal measure of the asymmetry of the data distribution.
 -   **Outliers**: Data points identified as abnormally distant from other values.
@@ -45,7 +46,7 @@ To use this program, you need to have Go installed on your system.
 
 ## Usage
 
-The program can be run in two ways: by providing a filename as a command-line argument or by piping data into it using the `-` argument.
+The program can be run in two ways: by providing a filename as a command-line argument or by piping data into it. The program automatically detects piped input, so the `-` argument is optional.
 
 ### 1. Read from a File
 
@@ -63,20 +64,23 @@ Provide the path to a file containing numbers, one per line.
 
 ### 2. Read from Standard Input (stdin)
 
-Use the `-` argument to tell the program to read from standard input. This allows you to pipe data from other commands.
+Pipe data from other commands directly into the program. The program automatically detects piped input, so no special argument is needed. You can optionally use the `-` argument for explicit stdin reading.
 
 **Syntax:**
 ```bash
-<command> | ./stats -
+<command> | ./stats
 ```
 
 **Examples:**
 ```bash
 # Pipe the contents of a file
-cat data.txt | ./stats -
+cat data.txt | ./stats
 
 # Pipe output from another command (e.g., extracting a column from a CSV)
-awk -F',' '{print $3}' metrics.csv | ./stats -
+awk -F',' '{print $3}' metrics.csv | ./stats
+
+# Explicit stdin reading (also works)
+cat data.txt | ./stats -
 
 # Manually enter numbers (press Ctrl+D when finished)
 ./stats -
@@ -128,6 +132,8 @@ Std Deviation:  7.4605
 Variance:       55.6597
 Quartile 1 (p25): 15.7350
 Quartile 3 (p75): 21.7650
+Percentile (p95): 36.8010
+Percentile (p99): 38.5202
 IQR:            6.0300
 Skewness:       1.6862 (Highly Right Skewed)
 Outliers:       [35.88 38.95]
@@ -147,6 +153,8 @@ Outliers:       [35.88 38.95]
 | **Variance**      | The square of the standard deviation.                                                                                                                                      |
 | **Quartile 1 (p25)** | The value below which 25% of the data falls.                                                                                                                            |
 | **Quartile 3 (p75)** | The value below which 75% of the data falls.                                                                                                                            |
+| **Percentile (p95)** | The value below which 95% of the data falls. Useful for understanding the upper tail of the distribution.                                                              |
+| **Percentile (p99)** | The value below which 99% of the data falls. Useful for identifying extreme values and tail behavior.                                                                   |
 | **IQR**           | The Interquartile Range (`Q3 - Q1`). It represents the middle 50% of the data and is a robust measure of spread.                                                           |
 | **Skewness**      | A measure of asymmetry. A value near 0 is symmetrical. A positive value indicates a "right skew" (a long tail of high values). A negative value indicates a "left skew".   |
 | **Outliers**      | Values that fall outside the range of `Q1 - 1.5*IQR` and `Q3 + 1.5*IQR`. These are statistically unusual data points.                                                      |
