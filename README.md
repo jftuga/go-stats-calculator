@@ -180,7 +180,7 @@ go test -v
 
 A shell script independently calculates statistics using `bc` (arbitrary precision calculator) and compares the results against the program's output. This provides external validation that the Go implementation produces correct results.
 
-The script was developed and tested on macOS Sequoia 15.7.3 using:
+The script was developed and tested on `MacOS Sequoia 15.7.3` using:
 - `bc` - arbitrary precision calculator for sum, mean, variance, standard deviation, and percentile calculations
 - `sort` - for ordering the dataset to verify percentile indices
 
@@ -199,3 +199,9 @@ The test dataset consists of 31 numbers designed to exercise common scenarios:
 - An outlier value to verify outlier detection
 
 The tests focus on typical usage patterns and do not cover exotic edge cases, extreme values, or adversarial inputs. Users requiring high-assurance results for critical applications should perform additional validation appropriate to their use case.
+
+## Disclosure Notification
+
+This program is my own original idea and was completely developed
+on my own personal time, for my own personal benefit, and on my
+personally owned equipment.
