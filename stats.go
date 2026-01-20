@@ -20,30 +20,38 @@ const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
 
-const PgmVersion string = "1.0.0"
+const PgmVersion string = "1.1.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
-	Count    int
-	Sum      float64
-	Mean     float64
-	Median   float64
-	Mode     []float64 // A dataset can have more than one mode
-	Min      float64
-	Max      float64
-	StdDev   float64 // Standard Deviation
-	Variance float64 // Variance = StdDev^2
-	Q1       float64 // 1st Quartile (25th percentile)
-	Q3       float64 // 3rd Quartile (75th percentile)
-	P95      float64 // 95th percentile
-	P99      float64 // 99th percentile
-	IQR      float64 // Interquartile Range (Q3 - Q1)
-	Outliers []float64
-	Skewness float64 // Formal skewness value
+	Count             int
+	Sum               float64
+	Mean              float64
+	Median            float64
+	Mode              []float64 // A dataset can have more than one mode
+	Min               float64
+	Max               float64
+	StdDev            float64 // Standard Deviation
+	Variance          float64 // Variance = StdDev^2
+	Q1                float64 // 1st Quartile (25th percentile)
+	Q3                float64 // 3rd Quartile (75th percentile)
+	P95               float64 // 95th percentile
+	P99               float64 // 99th percentile
+	IQR               float64 // Interquartile Range (Q3 - Q1)
+	Outliers          []float64
+	Skewness          float64             // Formal skewness value
+	CustomPercentiles map[float64]float64 // User-requested percentiles
 }
 
 func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [options] <filename | ->\n", os.Args[0])
+		fmt.Fprintln(os.Stderr, "Computes statistics from a list of numbers.")
+		fmt.Fprintln(os.Stderr, "\nOptions:")
+		flag.PrintDefaults()
+	}
 	version := flag.Bool("v", false, "show version")
+	percentileFlag := flag.String("p", "", "comma-separated percentiles to compute (0.0-100.0)")
 	flag.Parse()
 
 	if *version {
@@ -55,10 +63,8 @@ func main() {
 	inputIsTerminal := term.IsTerminal(int(os.Stdin.Fd()))
 
 	if len(args) < 1 && inputIsTerminal {
-		fmt.Fprintf(os.Stderr, "Usage:\n  %s <filename>\n  %s -\n", os.Args[0], os.Args[0])
-		fmt.Fprintln(os.Stderr, "Description:\n  Computes statistics from a list of numbers.")
-		fmt.Fprintln(os.Stderr, "  Provide a filename or use '-' to read from standard input.")
-		os.Exit(1)
+		flag.Usage()
+		os.Exit(0)
 	}
 
 	var reader io.Reader
@@ -82,7 +88,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	stats, err := computeStats(numbers)
+	var customPercentiles []float64
+	if *percentileFlag != "" {
+		for _, s := range strings.Split(*percentileFlag, ",") {
+			p, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: invalid percentile value '%s'\n", s)
+				os.Exit(1)
+			}
+			if p < 0 || p > 100 {
+				fmt.Fprintf(os.Stderr, "Error: percentile %v must be between 0 and 100\n", p)
+				os.Exit(1)
+			}
+			customPercentiles = append(customPercentiles, p)
+		}
+	}
+
+	stats, err := computeStats(numbers, customPercentiles)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error computing stats: %v\n", err)
 		os.Exit(1)
@@ -120,7 +142,7 @@ func readNumbers(reader io.Reader) ([]float64, error) {
 }
 
 // computeStats calculates all the desired statistics for a slice of numbers.
-func computeStats(data []float64) (*Stats, error) {
+func computeStats(data []float64, customPercentiles []float64) (*Stats, error) {
 	count := len(data)
 	if count == 0 {
 		return nil, fmt.Errorf("input contains no valid numbers")
@@ -163,6 +185,14 @@ func computeStats(data []float64) (*Stats, error) {
 	stats.Q3 = calculatePercentile(sortedData, 0.75)
 	stats.P95 = calculatePercentile(sortedData, 0.95)
 	stats.P99 = calculatePercentile(sortedData, 0.99)
+
+	// --- Custom Percentiles ---
+	if len(customPercentiles) > 0 {
+		stats.CustomPercentiles = make(map[float64]float64)
+		for _, p := range customPercentiles {
+			stats.CustomPercentiles[p] = calculatePercentile(sortedData, p/100.0)
+		}
+	}
 
 	// --- IQR ---
 	stats.IQR = stats.Q3 - stats.Q1
@@ -315,8 +345,18 @@ func printStats(s *Stats) {
 	fmt.Printf("Variance:       %s\n", formatFloat(s.Variance))
 	fmt.Printf("Quartile 1 (p25): %s\n", formatFloat(s.Q1))
 	fmt.Printf("Quartile 3 (p75): %s\n", formatFloat(s.Q3))
-	fmt.Printf("Percentile (p95): %s\n", formatFloat(s.P95))
-	fmt.Printf("Percentile (p99): %s\n", formatFloat(s.P99))
+	allPercentiles := map[float64]float64{95: s.P95, 99: s.P99}
+	for k, v := range s.CustomPercentiles {
+		allPercentiles[k] = v
+	}
+	pctKeys := make([]float64, 0, len(allPercentiles))
+	for k := range allPercentiles {
+		pctKeys = append(pctKeys, k)
+	}
+	sort.Float64s(pctKeys)
+	for _, k := range pctKeys {
+		fmt.Printf("Percentile (p%s): %s\n", formatFloat(k), formatFloat(allPercentiles[k]))
+	}
 	fmt.Printf("IQR:            %s\n", formatFloat(s.IQR))
 	fmt.Printf("Skewness:       %s (%s)\n", formatFloat(s.Skewness), interpretSkewness(s.Skewness))
 	if len(s.Outliers) > 0 {

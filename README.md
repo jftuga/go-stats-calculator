@@ -23,6 +23,7 @@ The calculator computes the following statistics:
 -   **Variance**: The square of the standard deviation.
 -   **Quartiles (Q1, Q3)**: The 25th (p25) and 75th (p75) percentiles.
 -   **Percentiles (p95, p99)**: The 95th and 99th percentiles, useful for understanding tail distributions.
+-   **Custom Percentiles**: Compute any percentile(s) between 0 and 100 using the `-p` flag.
 -   **Interquartile Range (IQR)**: The range between the first and third quartiles (Q3 - Q1).
 -   **Skewness**: A formal measure of the asymmetry of the data distribution.
 -   **Outliers**: Data points identified as abnormally distant from other values.
@@ -90,6 +91,27 @@ cat data.txt | ./stats -
 ^D
 ```
 
+### 3. Custom Percentiles
+
+Use the `-p` flag to compute additional percentiles. Provide a comma-separated list of values between 0 and 100.
+
+**Syntax:**
+```bash
+./stats -p <percentiles> <filename>
+```
+
+**Examples:**
+```bash
+# Compute 10th and 90th percentiles
+./stats -p "10,90" data.txt
+
+# Compute multiple percentiles including decimals
+./stats -p "5,10,90,99.9" data.txt
+
+# Combined with stdin
+cat data.txt | ./stats -p "10,50,90"
+```
+
 ## Example
 
 Given a file named `sample_data.txt` with the following content:
@@ -155,6 +177,7 @@ Outliers:       [35.88 38.95]
 | **Quartile 3 (p75)** | The value below which 75% of the data falls.                                                                                                                            |
 | **Percentile (p95)** | The value below which 95% of the data falls. Useful for understanding the upper tail of the distribution.                                                              |
 | **Percentile (p99)** | The value below which 99% of the data falls. Useful for identifying extreme values and tail behavior.                                                                   |
+| **Percentile (pN)** | Custom percentiles requested via the `-p` flag. The value below which N% of the data falls.                                                                              |
 | **IQR**           | The Interquartile Range (`Q3 - Q1`). It represents the middle 50% of the data and is a robust measure of spread.                                                           |
 | **Skewness**      | A measure of asymmetry. A value near 0 is symmetrical. A positive value indicates a "right skew" (a long tail of high values). A negative value indicates a "left skew".   |
 | **Outliers**      | Values that fall outside the range of `Q1 - 1.5*IQR` and `Q3 + 1.5*IQR`. These are statistically unusual data points.                                                      |
