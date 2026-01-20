@@ -35,7 +35,7 @@ var testData = []float64{
 }
 
 func TestComputeStats(t *testing.T) {
-	stats, err := computeStats(testData)
+	stats, err := computeStats(testData, nil)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -87,14 +87,14 @@ func TestComputeStats(t *testing.T) {
 }
 
 func TestComputeStatsEmptyInput(t *testing.T) {
-	_, err := computeStats([]float64{})
+	_, err := computeStats([]float64{}, nil)
 	if err == nil {
 		t.Error("expected error for empty input, got nil")
 	}
 }
 
 func TestComputeStatsSingleValue(t *testing.T) {
-	stats, err := computeStats([]float64{42.5})
+	stats, err := computeStats([]float64{42.5}, nil)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestComputeStatsSingleValue(t *testing.T) {
 func TestComputeStatsMultipleMode(t *testing.T) {
 	// 5 and 10 both appear twice
 	data := []float64{5, 5, 10, 10, 15}
-	stats, err := computeStats(data)
+	stats, err := computeStats(data, nil)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestComputeStatsMultipleMode(t *testing.T) {
 func TestComputeStatsNoMode(t *testing.T) {
 	// All values unique - no mode
 	data := []float64{1, 2, 3, 4, 5}
-	stats, err := computeStats(data)
+	stats, err := computeStats(data, nil)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
