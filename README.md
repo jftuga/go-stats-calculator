@@ -1,5 +1,7 @@
 # Go Stats Calculator
 
+![Code Base: AI Vibes](https://img.shields.io/badge/Code%20Base-AI%20Vibes%20%F0%9F%A4%A0-blue)
+
 A robust, command-line tool written in Go to compute a comprehensive set of descriptive statistics from a list of numbers. It can read data from a file or directly from standard input, making it a flexible utility for data analysis in any shell environment.
 
 ## Overview
