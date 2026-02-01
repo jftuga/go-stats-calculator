@@ -20,7 +20,7 @@ const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
 
-const PgmVersion string = "1.6.0"
+const PgmVersion string = "1.7.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
@@ -39,6 +39,8 @@ type Stats struct {
 	P99               float64 // 99th percentile
 	IQR               float64 // Interquartile Range (Q3 - Q1)
 	Outliers          []float64
+	ZScoreOutliers    []float64           // Outliers detected via Z-score method
+	ZScoreThreshold   float64             // Z-score threshold used (0 = disabled)
 	Skewness          float64             // Formal skewness value
 	Kurtosis          float64             // Excess kurtosis
 	CV                float64             // Coefficient of Variation as a percentage
@@ -60,10 +62,16 @@ func main() {
 	percentileFlag := flag.String("p", "", "comma-separated percentiles to compute (0.0-100.0)")
 	iqrMultiplier := flag.Float64("k", 1.5, "IQR multiplier for outlier detection (default: 1.5)")
 	numBins := flag.Int("b", 16, "number of bins for histogram and trendline (5-50)")
+	zScoreThreshold := flag.Float64("z", 0, "Z-score threshold for outlier detection (e.g., 2.0, 2.5, 3.0; disabled by default)")
 	flag.Parse()
 
 	if *numBins < 5 || *numBins > 50 {
 		fmt.Fprintf(os.Stderr, "Error: number of bins must be between 5 and 50, got %d\n", *numBins)
+		os.Exit(1)
+	}
+
+	if *zScoreThreshold != 0 && *zScoreThreshold < 1.0 {
+		fmt.Fprintf(os.Stderr, "Error: Z-score threshold must be >= 1.0, got %v\n", *zScoreThreshold)
 		os.Exit(1)
 	}
 
@@ -117,16 +125,26 @@ func main() {
 		}
 	}
 
-	stats, err := computeStats(numbers, customPercentiles, *iqrMultiplier, *numBins)
+	stats, err := computeStats(numbers, customPercentiles, *iqrMultiplier, *numBins, *zScoreThreshold)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error computing stats: %v\n", err)
 		os.Exit(1)
 	}
 
-	labelWidth := 18
-	if len(customPercentiles) > 0 {
-		labelWidth = 22
+	labelWidth := 18 // len("Quartile 1 (p25):")
+	for _, p := range customPercentiles {
+		label := fmt.Sprintf("Percentile (p%s):", formatFloat(p))
+		if len(label) > labelWidth {
+			labelWidth = len(label)
+		}
 	}
+	if *zScoreThreshold > 0 {
+		label := fmt.Sprintf("Z-Outliers (Z>%s):", formatFloat(*zScoreThreshold))
+		if len(label) > labelWidth {
+			labelWidth = len(label)
+		}
+	}
+	labelWidth++ // ensure padding via fmt.Sprintf, not the label+space fallback in padLabel
 	printStats(stats, labelWidth)
 }
 
@@ -159,7 +177,7 @@ func readNumbers(reader io.Reader) ([]float64, error) {
 }
 
 // computeStats calculates all the desired statistics for a slice of numbers.
-func computeStats(data []float64, customPercentiles []float64, iqrMultiplier float64, numBins int) (*Stats, error) {
+func computeStats(data []float64, customPercentiles []float64, iqrMultiplier float64, numBins int, zScoreThreshold float64) (*Stats, error) {
 	count := len(data)
 	if count == 0 {
 		return nil, fmt.Errorf("input contains no valid numbers")
@@ -249,6 +267,18 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 		}
 	}
 	sort.Float64s(stats.Outliers) // For consistent output
+
+	// --- Z-Score Outliers ---
+	if zScoreThreshold > 0 && stats.StdDev > 0 {
+		stats.ZScoreThreshold = zScoreThreshold
+		for _, v := range data {
+			z := math.Abs((v - stats.Mean) / stats.StdDev)
+			if z > zScoreThreshold {
+				stats.ZScoreOutliers = append(stats.ZScoreOutliers, v)
+			}
+		}
+		sort.Float64s(stats.ZScoreOutliers)
+	}
 
 	// --- Skewness (formal calculation) ---
 	stats.Skewness = calculateSkewness(data, stats.Mean, stats.StdDev)
@@ -565,6 +595,14 @@ func printStats(s *Stats, labelWidth int) {
 		fmt.Printf("%s%s\n", padLabel("Outliers:", labelWidth), formatFloatSlice(s.Outliers))
 	} else {
 		fmt.Printf("%s%s\n", padLabel("Outliers:", labelWidth), "None")
+	}
+	if s.ZScoreThreshold > 0 {
+		label := fmt.Sprintf("Z-Outliers (Z>%s):", formatFloat(s.ZScoreThreshold))
+		if len(s.ZScoreOutliers) > 0 {
+			fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloatSlice(s.ZScoreOutliers))
+		} else {
+			fmt.Printf("%s%s\n", padLabel(label, labelWidth), "None")
+		}
 	}
 	if s.Histogram != "" || s.Trendline != "" {
 		fmt.Printf("\n--- Distribution ---\n")

@@ -159,6 +159,26 @@ SUM_FOURTH=$(echo "$KURT_EXPR" | bc -l)
 KURTOSIS=$(echo "scale=10; ($COUNT * ($COUNT + 1)) / (($COUNT - 1) * ($COUNT - 2) * ($COUNT - 3)) * $SUM_FOURTH - 3 * ($COUNT - 1)^2 / (($COUNT - 2) * ($COUNT - 3))" | bc -l)
 printf "%-20s %.10f\n" "Kurtosis:" "$KURTOSIS"
 
+# Z-Score Outliers (threshold = 2.0)
+echo ""
+echo "--- Z-Score Outliers (threshold=2.0) ---"
+Z_THRESHOLD="2.0"
+Z_OUTLIERS=""
+Z_OUTLIER_COUNT=0
+for val in $DATA; do
+    Z=$(echo "scale=10; x=($val - $MEAN) / $STDDEV; if (x < 0) -x else x" | bc -l)
+    IS_OUTLIER=$(echo "$Z > $Z_THRESHOLD" | bc -l)
+    if [[ "$IS_OUTLIER" == "1" ]]; then
+        printf "  %s has Z=%.4f > %s (OUTLIER)\n" "$val" "$Z" "$Z_THRESHOLD"
+        Z_OUTLIERS="$Z_OUTLIERS $val"
+        ((Z_OUTLIER_COUNT++))
+    fi
+done
+if [[ $Z_OUTLIER_COUNT -eq 0 ]]; then
+    echo "  No Z-score outliers found"
+fi
+printf "%-20s %d\n" "Z-Outlier Count:" "$Z_OUTLIER_COUNT"
+
 # Now run the actual program and compare
 echo ""
 echo "=============================================="
@@ -172,9 +192,9 @@ echo "$DATA" | tr ' ' '\n' > "$TMPFILE"
 
 # Run stats program (assuming it's built or we use go run)
 if [[ -f "./stats" ]]; then
-    PROGRAM_OUTPUT=$(./stats "$TMPFILE")
+    PROGRAM_OUTPUT=$(./stats -z 2.0 "$TMPFILE")
 elif command -v go &> /dev/null; then
-    PROGRAM_OUTPUT=$(go run stats.go "$TMPFILE")
+    PROGRAM_OUTPUT=$(go run stats.go -z 2.0 "$TMPFILE")
 else
     echo "Error: Neither ./stats binary nor go command found"
     rm "$TMPFILE"
@@ -255,6 +275,22 @@ compare_values "IQR" "$IQR" "$PROG_IQR"
 compare_values "CV (%)" "$CV" "$PROG_CV"
 compare_values "Skewness" "$SKEWNESS" "$PROG_SKEWNESS"
 compare_values "Kurtosis" "$KURTOSIS" "$PROG_KURTOSIS"
+
+# Extract Z-score outlier count from program output
+PROG_Z_LINE=$(echo "$PROGRAM_OUTPUT" | grep "^Z-Outliers")
+if [[ -n "$PROG_Z_LINE" ]]; then
+    # Count values in brackets: extract bracket content, count space-separated items
+    PROG_Z_CONTENT=$(echo "$PROG_Z_LINE" | sed 's/.*\[//' | sed 's/\].*//')
+    if [[ "$PROG_Z_CONTENT" == *"None"* ]] || [[ -z "$PROG_Z_CONTENT" ]]; then
+        PROG_Z_COUNT=0
+    else
+        PROG_Z_COUNT=$(echo "$PROG_Z_CONTENT" | wc -w | tr -d ' ')
+    fi
+    compare_values "Z-Outliers" "$Z_OUTLIER_COUNT" "$PROG_Z_COUNT"
+else
+    printf "| %-12s | %15s | %15s | %-6s |\n" "Z-Outliers" "$Z_OUTLIER_COUNT" "N/A" "SKIP"
+    ((FAILURES++))
+fi
 echo ""
 
 if [[ $FAILURES -eq 0 ]]; then
