@@ -20,7 +20,7 @@ const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
 
-const PgmVersion string = "1.2.0"
+const PgmVersion string = "1.3.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
@@ -40,6 +40,9 @@ type Stats struct {
 	IQR               float64 // Interquartile Range (Q3 - Q1)
 	Outliers          []float64
 	Skewness          float64             // Formal skewness value
+	CV                float64             // Coefficient of Variation as a percentage
+	HasNegativeData   bool                // Flag for negative value warning
+	CVValid           bool                // False when mean is near zero
 	CustomPercentiles map[float64]float64 // User-requested percentiles
 }
 
@@ -111,7 +114,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	printStats(stats)
+	labelWidth := 18
+	if len(customPercentiles) > 0 {
+		labelWidth = 22
+	}
+	printStats(stats, labelWidth)
 }
 
 // readNumbers reads floating-point numbers (one per line) from an io.Reader.
@@ -237,6 +244,22 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 	// --- Skewness (formal calculation) ---
 	stats.Skewness = calculateSkewness(data, stats.Mean, stats.StdDev)
 
+	// --- Check for negative data ---
+	for _, v := range data {
+		if v < 0 {
+			stats.HasNegativeData = true
+			break
+		}
+	}
+
+	// --- Coefficient of Variation ---
+	if math.Abs(stats.Mean) < 1e-10 {
+		stats.CVValid = false
+	} else {
+		stats.CVValid = true
+		stats.CV = (stats.StdDev / math.Abs(stats.Mean)) * 100
+	}
+
 	return stats, nil
 }
 
@@ -276,6 +299,17 @@ func calculateSkewness(data []float64, mean, stdDev float64) float64 {
 
 	// Formula for sample skewness
 	return (n / ((n - 1) * (n - 2))) * (sumOfCubedDeviations / math.Pow(stdDev, 3))
+}
+
+// interpretCV provides a human-readable label for a coefficient of variation value.
+func interpretCV(cv float64) string {
+	if cv < 15 {
+		return "Low Variability"
+	}
+	if cv < 30 {
+		return "Moderate Variability"
+	}
+	return "High Variability"
 }
 
 // formatFloat formats a float64 without scientific notation, trimming unnecessary trailing zeros.
@@ -319,33 +353,51 @@ func interpretSkewness(s float64) string {
 	return "Highly Left Skewed"
 }
 
+// padLabel pads a label to at least labelWidth characters, ensuring at least one trailing space.
+func padLabel(label string, labelWidth int) string {
+	padded := fmt.Sprintf("%-*s", labelWidth, label)
+	if len(label) >= labelWidth {
+		padded = label + " "
+	}
+	return padded
+}
+
 // printStats displays the results in a readable format.
-func printStats(s *Stats) {
+func printStats(s *Stats, labelWidth int) {
 	fmt.Println("--- Descriptive Statistics ---")
-	fmt.Printf("Count:          %d\n", s.Count)
-	fmt.Printf("Sum:            %s\n", formatFloat(s.Sum))
-	fmt.Printf("Min:            %s\n", formatFloat(s.Min))
-	fmt.Printf("Max:            %s\n", formatFloat(s.Max))
+	fmt.Printf("%s%d\n", padLabel("Count:", labelWidth), s.Count)
+	fmt.Printf("%s%s\n", padLabel("Sum:", labelWidth), formatFloat(s.Sum))
+	fmt.Printf("%s%s\n", padLabel("Min:", labelWidth), formatFloat(s.Min))
+	fmt.Printf("%s%s\n", padLabel("Max:", labelWidth), formatFloat(s.Max))
 	fmt.Println("\n--- Measures of Central Tendency ---")
-	fmt.Printf("Mean:           %s\n", formatFloat(s.Mean))
-	fmt.Printf("Median (p50):   %s\n", formatFloat(s.Median))
+	fmt.Printf("%s%s\n", padLabel("Mean:", labelWidth), formatFloat(s.Mean))
+	fmt.Printf("%s%s\n", padLabel("Median (p50):", labelWidth), formatFloat(s.Median))
 
 	switch len(s.Mode) {
 	case 0:
-		fmt.Println("Mode:           None")
+		fmt.Printf("%s%s\n", padLabel("Mode:", labelWidth), "None")
 	case 1:
 		// If there's only one mode, print it as a clean number.
-		fmt.Printf("Mode:           %s\n", formatFloat(s.Mode[0]))
+		fmt.Printf("%s%s\n", padLabel("Mode:", labelWidth), formatFloat(s.Mode[0]))
 	default:
 		// If there are multiple modes, label it and print the slice.
-		fmt.Printf("Mode (multi):   %s\n", formatFloatSlice(s.Mode))
+		fmt.Printf("%s%s\n", padLabel("Mode (multi):", labelWidth), formatFloatSlice(s.Mode))
 	}
 
 	fmt.Println("\n--- Measures of Spread & Distribution ---")
-	fmt.Printf("Std Deviation:  %s\n", formatFloat(s.StdDev))
-	fmt.Printf("Variance:       %s\n", formatFloat(s.Variance))
-	fmt.Printf("Quartile 1 (p25): %s\n", formatFloat(s.Q1))
-	fmt.Printf("Quartile 3 (p75): %s\n", formatFloat(s.Q3))
+	fmt.Printf("%s%s\n", padLabel("Std Deviation:", labelWidth), formatFloat(s.StdDev))
+	fmt.Printf("%s%s\n", padLabel("Variance:", labelWidth), formatFloat(s.Variance))
+	if !s.CVValid {
+		fmt.Printf("%s%s\n", padLabel("CV:", labelWidth), "N/A - mean near zero")
+	} else {
+		cvStr := fmt.Sprintf("%s%% (%s)", formatFloat(s.CV), interpretCV(s.CV))
+		if s.HasNegativeData {
+			cvStr += " WARNING: data set contains negative data"
+		}
+		fmt.Printf("%s%s\n", padLabel("CV:", labelWidth), cvStr)
+	}
+	fmt.Printf("%s%s\n", padLabel("Quartile 1 (p25):", labelWidth), formatFloat(s.Q1))
+	fmt.Printf("%s%s\n", padLabel("Quartile 3 (p75):", labelWidth), formatFloat(s.Q3))
 	allPercentiles := map[float64]float64{95: s.P95, 99: s.P99}
 	for k, v := range s.CustomPercentiles {
 		allPercentiles[k] = v
@@ -356,13 +408,14 @@ func printStats(s *Stats) {
 	}
 	sort.Float64s(pctKeys)
 	for _, k := range pctKeys {
-		fmt.Printf("Percentile (p%s): %s\n", formatFloat(k), formatFloat(allPercentiles[k]))
+		label := fmt.Sprintf("Percentile (p%s):", formatFloat(k))
+		fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloat(allPercentiles[k]))
 	}
-	fmt.Printf("IQR:            %s\n", formatFloat(s.IQR))
-	fmt.Printf("Skewness:       %s (%s)\n", formatFloat(s.Skewness), interpretSkewness(s.Skewness))
+	fmt.Printf("%s%s\n", padLabel("IQR:", labelWidth), formatFloat(s.IQR))
+	fmt.Printf("%s%s (%s)\n", padLabel("Skewness:", labelWidth), formatFloat(s.Skewness), interpretSkewness(s.Skewness))
 	if len(s.Outliers) > 0 {
-		fmt.Printf("Outliers:       %s\n", formatFloatSlice(s.Outliers))
+		fmt.Printf("%s%s\n", padLabel("Outliers:", labelWidth), formatFloatSlice(s.Outliers))
 	} else {
-		fmt.Println("Outliers:       None")
+		fmt.Printf("%s%s\n", padLabel("Outliers:", labelWidth), "None")
 	}
 }

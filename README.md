@@ -28,6 +28,7 @@ The calculator computes the following statistics:
 -   **Custom Percentiles**: Compute any percentile(s) between 0 and 100 using the `-p` flag.
 -   **Interquartile Range (IQR)**: The range between the first and third quartiles (Q3 - Q1).
 -   **Skewness**: A formal measure of the asymmetry of the data distribution.
+-   **Coefficient of Variation (CV)**: The ratio of the standard deviation to the mean, expressed as a percentage. Useful for comparing variability across datasets with different units or scales.
 -   **Outliers**: Data points identified as abnormally distant from other values, using the IQR method with a configurable multiplier (`-k` flag).
 
 All numeric output uses full decimal notation (no scientific notation) with trailing zeros trimmed for readability.
@@ -184,15 +185,16 @@ Median (p50):   18.92
 Mode:           15.05
 
 --- Measures of Spread & Distribution ---
-Std Deviation:  7.4605
-Variance:       55.6597
+Std Deviation:    7.4605
+Variance:         55.6597
+CV:               35.9891% (High Variability)
 Quartile 1 (p25): 15.735
 Quartile 3 (p75): 21.765
 Percentile (p95): 36.801
 Percentile (p99): 38.5202
-IQR:            6.03
-Skewness:       1.6862 (Highly Right Skewed)
-Outliers:       [35.88 38.95]
+IQR:              6.03
+Skewness:         1.6862 (Highly Right Skewed)
+Outliers:         [35.88 38.95]
 ```
 
 ## Understanding the Output
@@ -207,6 +209,7 @@ Outliers:       [35.88 38.95]
 | **Mode**          | The number(s) that occur most frequently. If no number repeats, the mode is "None".                                                                                        |
 | **Std Deviation** | Measures how spread out the numbers are from the mean. A low value indicates data is clustered tightly; a high value indicates data is spread out.                         |
 | **Variance**      | The square of the standard deviation.                                                                                                                                      |
+| **CV**            | The ratio of the standard deviation to the mean, expressed as a percentage. CV < 15% indicates low variability, 15–30% moderate variability, and ≥ 30% high variability. Shows "N/A" when the mean is near zero, and displays a warning if the dataset contains negative values. |
 | **Quartile 1 (p25)** | The value below which 25% of the data falls.                                                                                                                            |
 | **Quartile 3 (p75)** | The value below which 75% of the data falls.                                                                                                                            |
 | **Percentile (p95)** | The value below which 95% of the data falls. Useful for understanding the upper tail of the distribution.                                                              |
