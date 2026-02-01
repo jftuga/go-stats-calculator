@@ -137,6 +137,28 @@ echo "--- Min/Max ---"
 printf "%-20s %s\n" "Min:" "$MIN"
 printf "%-20s %s\n" "Max:" "$MAX"
 
+# Skewness
+SKEW_EXPR="scale=10; "
+for val in $DATA; do
+    SKEW_EXPR+="(($val - $MEAN) / $STDDEV)^3 + "
+done
+SKEW_EXPR+="0"
+SUM_CUBED=$(echo "$SKEW_EXPR" | bc -l)
+SKEWNESS=$(echo "scale=10; ($COUNT / (($COUNT - 1) * ($COUNT - 2))) * $SUM_CUBED" | bc -l)
+echo ""
+echo "--- Skewness & Kurtosis ---"
+printf "%-20s %.10f\n" "Skewness:" "$SKEWNESS"
+
+# Kurtosis (excess kurtosis using sample formula)
+KURT_EXPR="scale=10; "
+for val in $DATA; do
+    KURT_EXPR+="(($val - $MEAN) / $STDDEV)^4 + "
+done
+KURT_EXPR+="0"
+SUM_FOURTH=$(echo "$KURT_EXPR" | bc -l)
+KURTOSIS=$(echo "scale=10; ($COUNT * ($COUNT + 1)) / (($COUNT - 1) * ($COUNT - 2) * ($COUNT - 3)) * $SUM_FOURTH - 3 * ($COUNT - 1)^2 / (($COUNT - 2) * ($COUNT - 3))" | bc -l)
+printf "%-20s %.10f\n" "Kurtosis:" "$KURTOSIS"
+
 # Now run the actual program and compare
 echo ""
 echo "=============================================="
@@ -180,6 +202,8 @@ PROG_P95=$(echo "$PROGRAM_OUTPUT" | grep "p95" | awk '{print $NF}')
 PROG_P99=$(echo "$PROGRAM_OUTPUT" | grep "p99" | awk '{print $NF}')
 PROG_IQR=$(extract_value "IQR:")
 PROG_CV=$(echo "$PROGRAM_OUTPUT" | grep "^CV:" | awk '{print $2}' | tr -d '%')
+PROG_SKEWNESS=$(echo "$PROGRAM_OUTPUT" | grep "^Skewness:" | awk '{print $2}')
+PROG_KURTOSIS=$(echo "$PROGRAM_OUTPUT" | grep "^Kurtosis:" | awk '{print $2}')
 PROG_MIN=$(extract_value "Min:")
 PROG_MAX=$(extract_value "Max:")
 
@@ -229,6 +253,8 @@ compare_values "P95" "$P95" "$PROG_P95"
 compare_values "P99" "$P99" "$PROG_P99"
 compare_values "IQR" "$IQR" "$PROG_IQR"
 compare_values "CV (%)" "$CV" "$PROG_CV"
+compare_values "Skewness" "$SKEWNESS" "$PROG_SKEWNESS"
+compare_values "Kurtosis" "$KURTOSIS" "$PROG_KURTOSIS"
 echo ""
 
 if [[ $FAILURES -eq 0 ]]; then

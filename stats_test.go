@@ -59,6 +59,7 @@ func TestComputeStats(t *testing.T) {
 		{"P99", stats.P99, 135},
 		{"IQR", stats.IQR, 45.125},
 		{"Skewness", stats.Skewness, 0.7271},
+		{"Kurtosis", stats.Kurtosis, 0.8884},
 	}
 
 	for _, tc := range tests {
@@ -239,6 +240,76 @@ func TestCalculateSkewnessEdgeCases(t *testing.T) {
 			t.Errorf("expected 0 for zero std dev, got %v", got)
 		}
 	})
+}
+
+func TestCalculateKurtosis(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     []float64
+		mean     float64
+		stdDev   float64
+		expected float64
+	}{
+		{
+			name:     "Right skewed data",
+			data:     testData,
+			mean:     51.7258,
+			stdDev:   33.5751,
+			expected: 0.8884,
+		},
+		{
+			name:     "Symmetric data",
+			data:     []float64{1, 2, 3, 4, 5, 6, 7, 8, 9},
+			mean:     5,
+			stdDev:   2.7386,
+			expected: -1.2,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := calculateKurtosis(tc.data, tc.mean, tc.stdDev)
+			if !floatEquals(got, tc.expected) {
+				t.Errorf("calculateKurtosis: got %v, expected %v", got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestCalculateKurtosisEdgeCases(t *testing.T) {
+	// Less than 4 data points - should return 0
+	t.Run("ThreeElements", func(t *testing.T) {
+		got := calculateKurtosis([]float64{1, 2, 3}, 2, 1)
+		if got != 0 {
+			t.Errorf("expected 0 for less than 4 elements, got %v", got)
+		}
+	})
+
+	// Zero standard deviation - should return 0
+	t.Run("ZeroStdDev", func(t *testing.T) {
+		got := calculateKurtosis([]float64{5, 5, 5, 5}, 5, 0)
+		if got != 0 {
+			t.Errorf("expected 0 for zero std dev, got %v", got)
+		}
+	})
+}
+
+func TestInterpretKurtosis(t *testing.T) {
+	tests := []struct {
+		kurtosis float64
+		expected string
+	}{
+		{-2, "Platykurtic - flat, thin tails"},
+		{0, "Mesokurtic - normal-like"},
+		{1, "Mesokurtic - normal-like"},
+		{2, "Leptokurtic - peaked, heavy tails"},
+	}
+	for _, tc := range tests {
+		got := interpretKurtosis(tc.kurtosis)
+		if got != tc.expected {
+			t.Errorf("interpretKurtosis(%v): got %q, expected %q", tc.kurtosis, got, tc.expected)
+		}
+	}
 }
 
 func TestReadNumbers(t *testing.T) {

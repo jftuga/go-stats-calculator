@@ -20,7 +20,7 @@ const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
 
-const PgmVersion string = "1.3.0"
+const PgmVersion string = "1.4.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
@@ -40,6 +40,7 @@ type Stats struct {
 	IQR               float64 // Interquartile Range (Q3 - Q1)
 	Outliers          []float64
 	Skewness          float64             // Formal skewness value
+	Kurtosis          float64             // Excess kurtosis
 	CV                float64             // Coefficient of Variation as a percentage
 	HasNegativeData   bool                // Flag for negative value warning
 	CVValid           bool                // False when mean is near zero
@@ -244,6 +245,9 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 	// --- Skewness (formal calculation) ---
 	stats.Skewness = calculateSkewness(data, stats.Mean, stats.StdDev)
 
+	// --- Kurtosis (excess kurtosis) ---
+	stats.Kurtosis = calculateKurtosis(data, stats.Mean, stats.StdDev)
+
 	// --- Check for negative data ---
 	for _, v := range data {
 		if v < 0 {
@@ -299,6 +303,31 @@ func calculateSkewness(data []float64, mean, stdDev float64) float64 {
 
 	// Formula for sample skewness
 	return (n / ((n - 1) * (n - 2))) * (sumOfCubedDeviations / math.Pow(stdDev, 3))
+}
+
+// calculateKurtosis computes the sample excess kurtosis.
+func calculateKurtosis(data []float64, mean, stdDev float64) float64 {
+	n := float64(len(data))
+	if n < 4 || stdDev == 0 {
+		return 0
+	}
+	var sumOfFourthDeviations float64
+	for _, v := range data {
+		sumOfFourthDeviations += math.Pow((v-mean)/stdDev, 4)
+	}
+	// Excess kurtosis using the sample formula
+	return (n*(n+1))/((n-1)*(n-2)*(n-3))*sumOfFourthDeviations - 3*(n-1)*(n-1)/((n-2)*(n-3))
+}
+
+// interpretKurtosis provides a human-readable label for a kurtosis value.
+func interpretKurtosis(k float64) string {
+	if k < -1 {
+		return "Platykurtic - flat, thin tails"
+	}
+	if k <= 1 {
+		return "Mesokurtic - normal-like"
+	}
+	return "Leptokurtic - peaked, heavy tails"
 }
 
 // interpretCV provides a human-readable label for a coefficient of variation value.
@@ -413,6 +442,7 @@ func printStats(s *Stats, labelWidth int) {
 	}
 	fmt.Printf("%s%s\n", padLabel("IQR:", labelWidth), formatFloat(s.IQR))
 	fmt.Printf("%s%s (%s)\n", padLabel("Skewness:", labelWidth), formatFloat(s.Skewness), interpretSkewness(s.Skewness))
+	fmt.Printf("%s%s (%s)\n", padLabel("Kurtosis:", labelWidth), formatFloat(s.Kurtosis), interpretKurtosis(s.Kurtosis))
 	if len(s.Outliers) > 0 {
 		fmt.Printf("%s%s\n", padLabel("Outliers:", labelWidth), formatFloatSlice(s.Outliers))
 	} else {
