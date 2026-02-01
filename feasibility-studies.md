@@ -7,13 +7,13 @@ Of the six features studied, ranked by fit and value for this tool:
 | Rank | Feature | Recommendation |
 |:-----|:--------|:---------------|
 | 1 | **Kurtosis** | Easiest win. Mirrors existing skewness pattern exactly. Pairs naturally with skewness to describe distribution shape. |
-| 2 | **Sparkline Histogram** | Highest visual impact, simple implementation. Surfaces distribution shape (bimodality, skew) that numbers alone hide. |
+| 2 | **Histogram** | Highest visual impact, simple implementation. Surfaces distribution shape (bimodality, skew) that numbers alone hide. |
 | 3 | **Z-Score Outlier Detection** | Best algorithmic fit, lowest cost, clearest value. Complements existing IQR detection. |
 | 4 | **Log Transformation** | Good fit, minimal code, real use case for heavy-tailed data. |
 | 5 | **Moving Averages / Rolling Windows** | Useful but introduces philosophical tension -- transforms data rather than describing it. |
 | 6 | **Sample vs. Population Variance** | Skip. The current `N-1` default is already correct for the target audience. |
 
-A potential follow-up to the sparkline: an **ASCII Box Plot** could be added later, especially if the tool ever supports comparing multiple datasets.
+A potential follow-up to the histogram: an **ASCII Box Plot** could be added later, especially if the tool ever supports comparing multiple datasets.
 
 ---
 
