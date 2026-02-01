@@ -20,7 +20,7 @@ const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
 
-const PgmVersion string = "1.5.0"
+const PgmVersion string = "1.6.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
@@ -45,7 +45,8 @@ type Stats struct {
 	HasNegativeData   bool                // Flag for negative value warning
 	CVValid           bool                // False when mean is near zero
 	CustomPercentiles map[float64]float64 // User-requested percentiles
-	Sparkline         string              // Unicode sparkline histogram
+	Histogram         string              // Unicode histogram showing distribution
+	Trendline         string              // Unicode trendline showing sequence pattern
 }
 
 func main() {
@@ -58,7 +59,7 @@ func main() {
 	version := flag.Bool("v", false, "show version")
 	percentileFlag := flag.String("p", "", "comma-separated percentiles to compute (0.0-100.0)")
 	iqrMultiplier := flag.Float64("k", 1.5, "IQR multiplier for outlier detection (default: 1.5)")
-	numBins := flag.Int("b", 16, "number of bins for sparkline histogram (5-50)")
+	numBins := flag.Int("b", 16, "number of bins for histogram and trendline (5-50)")
 	flag.Parse()
 
 	if *numBins < 5 || *numBins > 50 {
@@ -271,14 +272,17 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 		stats.CV = (stats.StdDev / math.Abs(stats.Mean)) * 100
 	}
 
-	// --- Sparkline ---
-	stats.Sparkline = generateSparkline(sortedData, numBins)
+	// --- Histogram ---
+	stats.Histogram = generateHistogram(sortedData, numBins)
+
+	// --- Trendline ---
+	stats.Trendline = generateTrendline(data, numBins)
 
 	return stats, nil
 }
 
-// generateSparkline creates a Unicode sparkline histogram from sorted data.
-func generateSparkline(sortedData []float64, numBins int) string {
+// generateHistogram creates a Unicode histogram from sorted data.
+func generateHistogram(sortedData []float64, numBins int) string {
 	n := len(sortedData)
 	if n < 2 {
 		return ""
@@ -316,6 +320,67 @@ func generateSparkline(sortedData []float64, numBins int) string {
 			level := (c * 7) / maxCount
 			runes[i] = blocks[level]
 		}
+	}
+	return string(runes)
+}
+
+// generateTrendline creates a Unicode trendline from data in its original input order.
+func generateTrendline(data []float64, numBins int) string {
+	n := len(data)
+	if n < 2 {
+		return ""
+	}
+
+	minVal := data[0]
+	maxVal := data[0]
+	for _, v := range data {
+		if v < minVal {
+			minVal = v
+		}
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	if minVal == maxVal {
+		return ""
+	}
+
+	// Cap numBins to data length
+	if numBins > n {
+		numBins = n
+	}
+
+	// Divide data into numBins equal chunks using floating-point boundaries and average each
+	step := float64(n) / float64(numBins)
+	averages := make([]float64, numBins)
+	for i := 0; i < numBins; i++ {
+		start := int(math.Round(float64(i) * step))
+		end := int(math.Round(float64(i+1) * step))
+		if end > n {
+			end = n
+		}
+		if end <= start {
+			end = start + 1
+		}
+		var sum float64
+		for j := start; j < end; j++ {
+			sum += data[j]
+		}
+		averages[i] = sum / float64(end-start)
+	}
+
+	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+	runes := make([]rune, numBins)
+	for i, avg := range averages {
+		normalized := (avg - minVal) / (maxVal - minVal)
+		level := int(math.Round(normalized * 7))
+		if level < 0 {
+			level = 0
+		}
+		if level > 7 {
+			level = 7
+		}
+		runes[i] = blocks[level]
 	}
 	return string(runes)
 }
@@ -501,8 +566,13 @@ func printStats(s *Stats, labelWidth int) {
 	} else {
 		fmt.Printf("%s%s\n", padLabel("Outliers:", labelWidth), "None")
 	}
-	if s.Sparkline != "" {
+	if s.Histogram != "" || s.Trendline != "" {
 		fmt.Printf("\n--- Distribution ---\n")
-		fmt.Printf("%s%s\n", padLabel("Sparkline:", labelWidth), s.Sparkline)
+		if s.Histogram != "" {
+			fmt.Printf("%s%s\n", padLabel("Histogram:", labelWidth), s.Histogram)
+		}
+		if s.Trendline != "" {
+			fmt.Printf("%s%s\n", padLabel("Trendline:", labelWidth), s.Trendline)
+		}
 	}
 }

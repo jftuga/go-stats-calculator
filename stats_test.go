@@ -442,53 +442,99 @@ func TestReadNumbersEmpty(t *testing.T) {
 	}
 }
 
-func TestGenerateSparkline(t *testing.T) {
+func TestGenerateHistogram(t *testing.T) {
 	sorted := make([]float64, len(testData))
 	copy(sorted, testData)
 	sort.Float64s(sorted)
-	result := generateSparkline(sorted, 16)
+	result := generateHistogram(sorted, 16)
 	if len([]rune(result)) != 16 {
 		t.Errorf("expected 16 runes, got %d", len([]rune(result)))
 	}
 	blocks := "▁▂▃▄▅▆▇█"
 	for _, r := range result {
 		if !strings.ContainsRune(blocks, r) {
-			t.Errorf("invalid sparkline character: %c", r)
+			t.Errorf("invalid histogram character: %c", r)
 		}
 	}
 }
 
-func TestGenerateSparklineUniform(t *testing.T) {
+func TestGenerateHistogramUniform(t *testing.T) {
 	data := make([]float64, 16)
 	for i := range data {
 		data[i] = float64(i + 1)
 	}
-	result := generateSparkline(data, 16)
+	result := generateHistogram(data, 16)
 	expected := "████████████████"
 	if result != expected {
 		t.Errorf("expected all full blocks, got %q", result)
 	}
 }
 
-func TestGenerateSparklineSingleValue(t *testing.T) {
-	result := generateSparkline([]float64{42}, 16)
+func TestGenerateHistogramSingleValue(t *testing.T) {
+	result := generateHistogram([]float64{42}, 16)
 	if result != "" {
 		t.Errorf("expected empty string for single value, got %q", result)
 	}
 }
 
-func TestGenerateSparklineAllIdentical(t *testing.T) {
-	result := generateSparkline([]float64{5, 5, 5, 5}, 16)
+func TestGenerateHistogramAllIdentical(t *testing.T) {
+	result := generateHistogram([]float64{5, 5, 5, 5}, 16)
 	if result != "" {
 		t.Errorf("expected empty string for identical values, got %q", result)
 	}
 }
 
-func TestGenerateSparklineCustomBins(t *testing.T) {
+func TestGenerateHistogramCustomBins(t *testing.T) {
 	sorted := make([]float64, len(testData))
 	copy(sorted, testData)
 	sort.Float64s(sorted)
-	result := generateSparkline(sorted, 8)
+	result := generateHistogram(sorted, 8)
+	if len([]rune(result)) != 8 {
+		t.Errorf("expected 8 runes, got %d", len([]rune(result)))
+	}
+}
+
+func TestGenerateTrendline(t *testing.T) {
+	result := generateTrendline(testData, 16)
+	if len([]rune(result)) != 16 {
+		t.Errorf("expected 16 runes, got %d", len([]rune(result)))
+	}
+	blocks := "▁▂▃▄▅▆▇█"
+	for _, r := range result {
+		if !strings.ContainsRune(blocks, r) {
+			t.Errorf("invalid trendline character: %c", r)
+		}
+	}
+}
+
+func TestGenerateTrendlinePreservesOrder(t *testing.T) {
+	// Ascending input should produce ascending blocks
+	data := []float64{1, 2, 3, 4, 5, 6, 7, 8}
+	result := generateTrendline(data, 8)
+	runes := []rune(result)
+	for i := 1; i < len(runes); i++ {
+		if runes[i] < runes[i-1] {
+			t.Errorf("expected ascending trendline, but position %d (%c) < position %d (%c)", i, runes[i], i-1, runes[i-1])
+		}
+	}
+}
+
+func TestGenerateTrendlineSingleValue(t *testing.T) {
+	result := generateTrendline([]float64{42}, 16)
+	if result != "" {
+		t.Errorf("expected empty string for single value, got %q", result)
+	}
+}
+
+func TestGenerateTrendlineAllIdentical(t *testing.T) {
+	result := generateTrendline([]float64{5, 5, 5, 5}, 16)
+	if result != "" {
+		t.Errorf("expected empty string for identical values, got %q", result)
+	}
+}
+
+func TestGenerateTrendlineCustomBins(t *testing.T) {
+	result := generateTrendline(testData, 8)
 	if len([]rune(result)) != 8 {
 		t.Errorf("expected 8 runes, got %d", len([]rune(result)))
 	}
