@@ -35,7 +35,7 @@ var testData = []float64{
 }
 
 func TestComputeStats(t *testing.T) {
-	stats, err := computeStats(testData, nil)
+	stats, err := computeStats(testData, nil, 1.5)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -87,14 +87,14 @@ func TestComputeStats(t *testing.T) {
 }
 
 func TestComputeStatsEmptyInput(t *testing.T) {
-	_, err := computeStats([]float64{}, nil)
+	_, err := computeStats([]float64{}, nil, 1.5)
 	if err == nil {
 		t.Error("expected error for empty input, got nil")
 	}
 }
 
 func TestComputeStatsSingleValue(t *testing.T) {
-	stats, err := computeStats([]float64{42.5}, nil)
+	stats, err := computeStats([]float64{42.5}, nil, 1.5)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestComputeStatsSingleValue(t *testing.T) {
 func TestComputeStatsMultipleMode(t *testing.T) {
 	// 5 and 10 both appear twice
 	data := []float64{5, 5, 10, 10, 15}
-	stats, err := computeStats(data, nil)
+	stats, err := computeStats(data, nil, 1.5)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestComputeStatsMultipleMode(t *testing.T) {
 func TestComputeStatsNoMode(t *testing.T) {
 	// All values unique - no mode
 	data := []float64{1, 2, 3, 4, 5}
-	stats, err := computeStats(data, nil)
+	stats, err := computeStats(data, nil, 1.5)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -258,6 +258,33 @@ invalid
 	expected := []float64{10, 20.5, 30.00, 40}
 	if !floatSliceEquals(numbers, expected) {
 		t.Errorf("readNumbers: got %v, expected %v", numbers, expected)
+	}
+}
+
+func TestComputeStatsCustomIQRMultiplier(t *testing.T) {
+	// With k=3.0 (extreme outliers only), 150 should no longer be an outlier
+	// Q1=27.5, Q3=72.625, IQR=45.125
+	// lowerBound = 27.5 - 3.0*45.125 = -108.875
+	// upperBound = 72.625 + 3.0*45.125 = 208.0
+	// 150 < 208.0, so no outliers
+	stats, err := computeStats(testData, nil, 3.0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if len(stats.Outliers) != 0 {
+		t.Errorf("Outliers with k=3.0: got %v, expected none", stats.Outliers)
+	}
+
+	// With k=1.0 (narrower), more values should be flagged
+	// lowerBound = 27.5 - 1.0*45.125 = -17.625
+	// upperBound = 72.625 + 1.0*45.125 = 117.75
+	// 150 > 117.75, so 150 is an outlier (same as default for this dataset)
+	stats, err = computeStats(testData, nil, 1.0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if len(stats.Outliers) != 1 || !floatEquals(stats.Outliers[0], 150) {
+		t.Errorf("Outliers with k=1.0: got %v, expected [150]", stats.Outliers)
 	}
 }
 

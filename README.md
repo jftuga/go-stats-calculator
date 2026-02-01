@@ -28,7 +28,7 @@ The calculator computes the following statistics:
 -   **Custom Percentiles**: Compute any percentile(s) between 0 and 100 using the `-p` flag.
 -   **Interquartile Range (IQR)**: The range between the first and third quartiles (Q3 - Q1).
 -   **Skewness**: A formal measure of the asymmetry of the data distribution.
--   **Outliers**: Data points identified as abnormally distant from other values.
+-   **Outliers**: Data points identified as abnormally distant from other values, using the IQR method with a configurable multiplier (`-k` flag).
 
 All numeric output uses full decimal notation (no scientific notation) with trailing zeros trimmed for readability.
 
@@ -114,6 +114,38 @@ Use the `-p` flag to compute additional percentiles. Provide a comma-separated l
 cat data.txt | ./stats -p "10,50,90"
 ```
 
+### 4. Outlier Sensitivity
+
+Use the `-k` flag to adjust the IQR multiplier used for outlier detection. The default is `1.5`, which corresponds to Tukey's inner fences. A smaller value flags more data points as outliers; a larger value flags fewer.
+
+**Syntax:**
+```bash
+./stats -k <multiplier> <filename>
+```
+
+**Examples:**
+```bash
+# Default behavior (k=1.5, Tukey's inner fences)
+./stats data.txt
+
+# Extreme outliers only (k=3.0, Tukey's outer fences)
+./stats -k 3.0 data.txt
+
+# High sensitivity (k=1.0, useful for fraud detection, quality control, or manual inspection)
+./stats -k 1.0 data.txt
+
+# Combined with other flags
+./stats -k 2.0 -p "10,90" data.txt
+```
+
+**Common multiplier values:**
+
+| Multiplier | Description |
+| :--------- | :---------- |
+| **1.0** | High sensitivity. Useful for scenarios such as fraud detection or quality control where you want to manually inspect anything even slightly suspicious. Will produce more false positives. |
+| **1.5** | Standard (default). Tukey's inner fences, the widely accepted general-purpose threshold. |
+| **3.0** | Tukey's outer fences, the standard threshold for extreme or "far out" outliers. Only the most anomalous points are flagged. |
+
 ## Example
 
 Given a file named `sample_data.txt` with the following content:
@@ -182,7 +214,7 @@ Outliers:       [35.88 38.95]
 | **Percentile (pN)** | Custom percentiles requested via the `-p` flag. The value below which N% of the data falls.                                                                              |
 | **IQR**           | The Interquartile Range (`Q3 - Q1`). It represents the middle 50% of the data and is a robust measure of spread.                                                           |
 | **Skewness**      | A measure of asymmetry. A value near 0 is symmetrical. A positive value indicates a "right skew" (a long tail of high values). A negative value indicates a "left skew".   |
-| **Outliers**      | Values that fall outside the range of `Q1 - 1.5*IQR` and `Q3 + 1.5*IQR`. These are statistically unusual data points.                                                      |
+| **Outliers**      | Values that fall outside the range of `Q1 - k*IQR` and `Q3 + k*IQR`, where `k` defaults to 1.5 and can be adjusted with the `-k` flag.                                      |
 
 ## Testing and Correctness
 
@@ -224,6 +256,11 @@ The test dataset consists of 31 numbers designed to exercise common scenarios:
 - An outlier value to verify outlier detection
 
 The tests focus on typical usage patterns and do not cover exotic edge cases, extreme values, or adversarial inputs. Users requiring high-assurance results for critical applications should perform additional validation appropriate to their use case.
+
+## Acknowledgements
+
+- [John Tukey's 1977 *Exploratory Data Analysis*](https://archive.org/details/exploratorydataa0000tuke_7616)
+    - Used as the source for the outlier sensitivity multiplier values (inner fences at 1.5×IQR and outer fences at 3.0×IQR)
 
 ## Personal Project Disclosure
 
