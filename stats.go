@@ -20,7 +20,7 @@ const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
 
-const PgmVersion string = "1.1.0"
+const PgmVersion string = "1.2.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
@@ -52,6 +52,7 @@ func main() {
 	}
 	version := flag.Bool("v", false, "show version")
 	percentileFlag := flag.String("p", "", "comma-separated percentiles to compute (0.0-100.0)")
+	iqrMultiplier := flag.Float64("k", 1.5, "IQR multiplier for outlier detection (default: 1.5)")
 	flag.Parse()
 
 	if *version {
@@ -104,7 +105,7 @@ func main() {
 		}
 	}
 
-	stats, err := computeStats(numbers, customPercentiles)
+	stats, err := computeStats(numbers, customPercentiles, *iqrMultiplier)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error computing stats: %v\n", err)
 		os.Exit(1)
@@ -142,7 +143,7 @@ func readNumbers(reader io.Reader) ([]float64, error) {
 }
 
 // computeStats calculates all the desired statistics for a slice of numbers.
-func computeStats(data []float64, customPercentiles []float64) (*Stats, error) {
+func computeStats(data []float64, customPercentiles []float64, iqrMultiplier float64) (*Stats, error) {
 	count := len(data)
 	if count == 0 {
 		return nil, fmt.Errorf("input contains no valid numbers")
@@ -222,9 +223,9 @@ func computeStats(data []float64, customPercentiles []float64) (*Stats, error) {
 		sort.Float64s(stats.Mode) // For consistent output
 	}
 
-	// --- Outliers (using the 1.5 * IQR rule) ---
-	lowerBound := stats.Q1 - 1.5*stats.IQR
-	upperBound := stats.Q3 + 1.5*stats.IQR
+	// --- Outliers (using the k * IQR rule) ---
+	lowerBound := stats.Q1 - iqrMultiplier*stats.IQR
+	upperBound := stats.Q3 + iqrMultiplier*stats.IQR
 
 	for _, v := range data {
 		if v < lowerBound || v > upperBound {
