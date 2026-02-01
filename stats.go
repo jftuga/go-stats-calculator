@@ -20,7 +20,7 @@ const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
 
-const PgmVersion string = "1.4.0"
+const PgmVersion string = "1.5.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
@@ -45,6 +45,7 @@ type Stats struct {
 	HasNegativeData   bool                // Flag for negative value warning
 	CVValid           bool                // False when mean is near zero
 	CustomPercentiles map[float64]float64 // User-requested percentiles
+	Sparkline         string              // Unicode sparkline histogram
 }
 
 func main() {
@@ -57,7 +58,13 @@ func main() {
 	version := flag.Bool("v", false, "show version")
 	percentileFlag := flag.String("p", "", "comma-separated percentiles to compute (0.0-100.0)")
 	iqrMultiplier := flag.Float64("k", 1.5, "IQR multiplier for outlier detection (default: 1.5)")
+	numBins := flag.Int("b", 16, "number of bins for sparkline histogram (5-50)")
 	flag.Parse()
+
+	if *numBins < 5 || *numBins > 50 {
+		fmt.Fprintf(os.Stderr, "Error: number of bins must be between 5 and 50, got %d\n", *numBins)
+		os.Exit(1)
+	}
 
 	if *version {
 		fmt.Printf("%s version %s\n%s\n\n%s\n%s\n", PgmName, PgmVersion, PgmUrl, PgmDisclaimer, PgmSeeAlso)
@@ -109,7 +116,7 @@ func main() {
 		}
 	}
 
-	stats, err := computeStats(numbers, customPercentiles, *iqrMultiplier)
+	stats, err := computeStats(numbers, customPercentiles, *iqrMultiplier, *numBins)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error computing stats: %v\n", err)
 		os.Exit(1)
@@ -151,7 +158,7 @@ func readNumbers(reader io.Reader) ([]float64, error) {
 }
 
 // computeStats calculates all the desired statistics for a slice of numbers.
-func computeStats(data []float64, customPercentiles []float64, iqrMultiplier float64) (*Stats, error) {
+func computeStats(data []float64, customPercentiles []float64, iqrMultiplier float64, numBins int) (*Stats, error) {
 	count := len(data)
 	if count == 0 {
 		return nil, fmt.Errorf("input contains no valid numbers")
@@ -264,7 +271,53 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 		stats.CV = (stats.StdDev / math.Abs(stats.Mean)) * 100
 	}
 
+	// --- Sparkline ---
+	stats.Sparkline = generateSparkline(sortedData, numBins)
+
 	return stats, nil
+}
+
+// generateSparkline creates a Unicode sparkline histogram from sorted data.
+func generateSparkline(sortedData []float64, numBins int) string {
+	n := len(sortedData)
+	if n < 2 {
+		return ""
+	}
+	minVal := sortedData[0]
+	maxVal := sortedData[n-1]
+	if minVal == maxVal {
+		return ""
+	}
+
+	binWidth := (maxVal - minVal) / float64(numBins)
+	bins := make([]int, numBins)
+
+	for _, v := range sortedData {
+		idx := int((v - minVal) / binWidth)
+		if idx >= numBins {
+			idx = numBins - 1
+		}
+		bins[idx]++
+	}
+
+	maxCount := 0
+	for _, c := range bins {
+		if c > maxCount {
+			maxCount = c
+		}
+	}
+
+	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+	runes := make([]rune, numBins)
+	for i, c := range bins {
+		if c == 0 {
+			runes[i] = blocks[0]
+		} else {
+			level := (c * 7) / maxCount
+			runes[i] = blocks[level]
+		}
+	}
+	return string(runes)
 }
 
 // calculatePercentile finds the value at a given percentile (p) in sorted data.
@@ -447,5 +500,9 @@ func printStats(s *Stats, labelWidth int) {
 		fmt.Printf("%s%s\n", padLabel("Outliers:", labelWidth), formatFloatSlice(s.Outliers))
 	} else {
 		fmt.Printf("%s%s\n", padLabel("Outliers:", labelWidth), "None")
+	}
+	if s.Sparkline != "" {
+		fmt.Printf("\n--- Distribution ---\n")
+		fmt.Printf("%s%s\n", padLabel("Sparkline:", labelWidth), s.Sparkline)
 	}
 }
