@@ -34,6 +34,7 @@ The calculator computes the following statistics:
 -   **Z-Score Outliers**: Optional outlier detection using Z-score method, flagging data points more than a configurable number of standard deviations from the mean (`-z` flag). Ideal for normally distributed data.
 -   **Histogram**: A single-line Unicode histogram showing the distribution of values across configurable bins (`-b` flag).
 -   **Trendline**: A single-line Unicode trendline showing the sequence pattern of values in their original input order, using configurable bins (`-b` flag).
+-   **Log Transform**: Optional natural log (ln) transform applied to all input data before computing statistics (`-l` flag). Useful for heavy-tailed data spanning several orders of magnitude (file sizes, latencies, income data). Requires all values to be positive.
 
 All numeric output uses full decimal notation (no scientific notation) with trailing zeros trimmed for readability.
 
@@ -218,6 +219,63 @@ Stick with the default IQR method when:
 | **1.5** | Standard (default). Tukey's inner fences, the widely accepted general-purpose threshold. |
 | **3.0** | Tukey's outer fences, the standard threshold for extreme or "far out" outliers. Only the most anomalous points are flagged. |
 
+### 7. Log Transform
+
+Use the `-l` flag to apply a natural log (ln) transform to all input values before computing statistics. Every number in the input is replaced with its natural logarithm, and then all statistics (mean, median, standard deviation, outliers, etc.) are calculated on those transformed values.
+
+All values must be positive (greater than zero). The program will exit with an error if any value is zero or negative.
+
+When the `-l` flag is active, output begins with a `(log-transformed, base e)` header to indicate that all statistics are in log-space.
+
+**Why log transform? — a plain-language explanation:**
+
+Some datasets have most values clustered at the low end with a long tail of much larger values. File sizes are a classic example: you might have thousands of 4 KB config files and a handful of 2 GB database dumps. When you compute a regular mean on data like this, the giant values dominate and the "average" doesn't describe anything typical. The histogram collapses into a single spike on the left because the scale has to stretch to accommodate the largest value.
+
+A log transform compresses large values and spreads out small ones. After the transform, the difference between 1 KB and 10 KB gets the same weight as the difference between 1 GB and 10 GB — because in both cases, you've moved one "order of magnitude." This makes the mean, standard deviation, and histogram much more informative for this kind of data.
+
+**Normal stats vs log-transformed — when to use which:**
+
+Run the tool without `-l` first. The default output is correct for any dataset and requires no interpretation. Use `-l` when the default output isn't telling you much because the data is heavily skewed.
+
+Consider using `-l` when:
+- Your data spans several orders of magnitude (e.g., file sizes from 1 KB to 10 GB, response times from 1 ms to 30 s).
+- The histogram is compressed into a single left-side spike with a long right tail.
+- The mean is much larger than the median — a sign that a few large values are pulling the average up.
+- You want outlier detection that isn't dominated by the largest values. Log transform compresses the upper tail, so only values that are extreme *relative to their neighborhood* get flagged.
+
+Stick with the default (no `-l`) when:
+- Your data is already reasonably symmetric (mean and median are close).
+- The histogram already shows a readable shape.
+- Your data contains zero or negative values (log is undefined for these).
+- You need results in original units without any back-conversion.
+
+**Syntax:**
+```bash
+./stats -l <filename>
+```
+
+**Examples:**
+```bash
+# Log-transform file sizes before computing stats
+./stats -l file_sizes.txt
+
+# Combined with other flags
+./stats -l -z 2.0 -p "10,90" data.txt
+
+# Piped input
+du -b /var/log/*.log | awk '{print $1}' | ./stats -l
+```
+
+**Reading the output:**
+
+All values in the output are in log-space. To convert any value back to original units, raise *e* to that power. For example, if the log-space mean is `3.4`, the original-scale equivalent is `e^3.4 ≈ 30`. A quick way to do this on the command line:
+
+```bash
+python3 -c "import math; print(math.exp(3.4))"
+```
+
+The log-space standard deviation has a useful interpretation: it approximates the "multiplicative spread" of the data. A log-space stddev of `1.0` means the typical value is within a factor of *e* (~2.7×) of the mean.
+
 ## Example
 
 Given a file named `sample_data.txt` with the following content:
@@ -301,6 +359,7 @@ The **Histogram** shows *distribution* — how values are spread across bins fro
 | **Z-Score Outliers** | Values whose Z-score (number of standard deviations from the mean) exceeds the threshold set with the `-z` flag. Only shown when `-z` is provided. Ideal for normally distributed data. |
 | **Histogram**     | A single-line Unicode histogram showing data distribution across bins. Each character represents a bin, with taller blocks indicating more values. Bin count is configurable with the `-b` flag (default 16). |
 | **Trendline**     | A single-line Unicode trendline showing the sequence pattern of values in their original input order. Data is divided into equal chunks, each averaged and mapped to a block character. Bin count is configurable with the `-b` flag (default 16). |
+| **Log Transform** | When the `-l` flag is used, a `(log-transformed, base e)` header appears above the output. All statistics are computed on `ln(x)` values. To convert back to original units, exponentiate (e.g., `e^mean`). Requires all input values to be positive. |
 
 ## Testing and Correctness
 

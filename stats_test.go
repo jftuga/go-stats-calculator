@@ -590,3 +590,45 @@ func TestZScoreZeroStdDev(t *testing.T) {
 		t.Errorf("ZScoreOutliers with zero stddev: got %v, expected nil", stats.ZScoreOutliers)
 	}
 }
+
+func TestApplyLogTransformPositiveValues(t *testing.T) {
+	data := []float64{1, 10, 100, 1000}
+	result, err := applyLogTransform(data)
+	if err != nil {
+		t.Fatalf("applyLogTransform returned error: %v", err)
+	}
+	// ln(1)=0, ln(10)=2.302585, ln(100)=4.605170, ln(1000)=6.907755
+	expected := []float64{0, 2.302585, 4.605170, 6.907755}
+	if !floatSliceEquals(result, expected) {
+		t.Errorf("applyLogTransform: got %v, expected %v", result, expected)
+	}
+
+	// Verify stats on transformed data
+	stats, err := computeStats(result, nil, 1.5, 16, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	// Mean of ln values: (0 + 2.302585 + 4.605170 + 6.907755) / 4 = 3.4539
+	if !floatEquals(stats.Mean, 3.4539) {
+		t.Errorf("Mean of log-transformed data: got %v, expected 3.4539", stats.Mean)
+	}
+	if stats.Count != 4 {
+		t.Errorf("Count: got %d, expected 4", stats.Count)
+	}
+}
+
+func TestApplyLogTransformErrorOnZero(t *testing.T) {
+	data := []float64{1, 2, 0, 4}
+	_, err := applyLogTransform(data)
+	if err == nil {
+		t.Error("expected error for zero value, got nil")
+	}
+}
+
+func TestApplyLogTransformErrorOnNegative(t *testing.T) {
+	data := []float64{1, 2, -5, 4}
+	_, err := applyLogTransform(data)
+	if err == nil {
+		t.Error("expected error for negative value, got nil")
+	}
+}

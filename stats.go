@@ -20,7 +20,7 @@ const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
 
-const PgmVersion string = "1.7.0"
+const PgmVersion string = "1.8.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
@@ -63,6 +63,7 @@ func main() {
 	iqrMultiplier := flag.Float64("k", 1.5, "IQR multiplier for outlier detection (default: 1.5)")
 	numBins := flag.Int("b", 16, "number of bins for histogram and trendline (5-50)")
 	zScoreThreshold := flag.Float64("z", 0, "Z-score threshold for outlier detection (e.g., 2.0, 2.5, 3.0; disabled by default)")
+	logTransform := flag.Bool("l", false, "apply natural log (ln) transform to input data")
 	flag.Parse()
 
 	if *numBins < 5 || *numBins > 50 {
@@ -109,6 +110,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	if *logTransform {
+		numbers, err = applyLogTransform(numbers)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	var customPercentiles []float64
 	if *percentileFlag != "" {
 		for _, s := range strings.Split(*percentileFlag, ",") {
@@ -145,6 +154,10 @@ func main() {
 		}
 	}
 	labelWidth++ // ensure padding via fmt.Sprintf, not the label+space fallback in padLabel
+	if *logTransform {
+		fmt.Println("(log-transformed, base e)")
+		fmt.Println()
+	}
 	printStats(stats, labelWidth)
 }
 
@@ -174,6 +187,18 @@ func readNumbers(reader io.Reader) ([]float64, error) {
 		numbers = append(numbers, num)
 	}
 	return numbers, scanner.Err()
+}
+
+// applyLogTransform applies natural log to all values, returning an error if any value is <= 0.
+func applyLogTransform(numbers []float64) ([]float64, error) {
+	result := make([]float64, len(numbers))
+	for i, v := range numbers {
+		if v <= 0 {
+			return nil, fmt.Errorf("log transform requires all positive values, but got %v", v)
+		}
+		result[i] = math.Log(v)
+	}
+	return result, nil
 }
 
 // computeStats calculates all the desired statistics for a slice of numbers.

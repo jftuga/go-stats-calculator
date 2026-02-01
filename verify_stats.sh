@@ -293,6 +293,59 @@ else
 fi
 echo ""
 
+# --- Log Transform Verification ---
+echo "=============================================="
+echo "Log Transform Verification"
+echo "=============================================="
+echo ""
+
+# Compute ln of each value and their mean using bc
+LOG_SUM="0"
+for val in $DATA; do
+    LOG_SUM=$(echo "scale=10; $LOG_SUM + l($val)" | bc -l)
+done
+LOG_MEAN=$(echo "scale=10; $LOG_SUM / $COUNT" | bc -l)
+
+# Compute ln variance and stddev
+LOG_SSQ="0"
+for val in $DATA; do
+    LOG_VAL=$(echo "scale=10; l($val)" | bc -l)
+    LOG_SSQ=$(echo "scale=10; $LOG_SSQ + ($LOG_VAL - $LOG_MEAN)^2" | bc -l)
+done
+LOG_VARIANCE=$(echo "scale=10; $LOG_SSQ / ($COUNT - 1)" | bc -l)
+LOG_STDDEV=$(echo "scale=10; sqrt($LOG_VARIANCE)" | bc -l)
+
+# Run program with -l flag
+TMPFILE2=$(mktemp)
+echo "$DATA" | tr ' ' '\n' > "$TMPFILE2"
+
+if [[ -f "./stats" ]]; then
+    LOG_OUTPUT=$(./stats -l "$TMPFILE2")
+elif command -v go &> /dev/null; then
+    LOG_OUTPUT=$(go run stats.go -l "$TMPFILE2")
+else
+    echo "Error: Neither ./stats binary nor go command found"
+    rm "$TMPFILE2"
+    exit 1
+fi
+
+rm "$TMPFILE2"
+
+echo "$LOG_OUTPUT"
+echo ""
+
+# Extract values from log-transformed output
+PROG_LOG_MEAN=$(echo "$LOG_OUTPUT" | grep "^Mean:" | awk '{print $2}')
+PROG_LOG_STDDEV=$(echo "$LOG_OUTPUT" | grep "^Std Deviation:" | awk '{print $NF}')
+PROG_LOG_VARIANCE=$(echo "$LOG_OUTPUT" | grep "^Variance:" | awk '{print $NF}')
+
+printf "| %-12s | %15s | %15s | %-6s |\n" "Statistic" "bc Calculation" "Program Output" "Match"
+printf "|--------------|-----------------|-----------------|--------|\n"
+compare_values "Log Mean" "$LOG_MEAN" "$PROG_LOG_MEAN"
+compare_values "Log StdDev" "$LOG_STDDEV" "$PROG_LOG_STDDEV"
+compare_values "Log Variance" "$LOG_VARIANCE" "$PROG_LOG_VARIANCE"
+echo ""
+
 if [[ $FAILURES -eq 0 ]]; then
     echo "Verification complete. All values match."
     exit 0
