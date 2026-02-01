@@ -288,6 +288,77 @@ func TestComputeStatsCustomIQRMultiplier(t *testing.T) {
 	}
 }
 
+func TestCVForTestData(t *testing.T) {
+	stats, err := computeStats(testData, nil, 1.5)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	// Mean=51.7258, StdDev=33.5751 → CV≈64.91%
+	expectedCV := 64.9097
+	if !floatEquals(stats.CV, expectedCV) {
+		t.Errorf("CV: got %v, expected %v", stats.CV, expectedCV)
+	}
+	if !stats.CVValid {
+		t.Error("CVValid: got false, expected true")
+	}
+	if stats.HasNegativeData {
+		t.Error("HasNegativeData: got true, expected false")
+	}
+}
+
+func TestInterpretCV(t *testing.T) {
+	tests := []struct {
+		cv       float64
+		expected string
+	}{
+		{10, "Low Variability"},
+		{20, "Moderate Variability"},
+		{50, "High Variability"},
+	}
+	for _, tc := range tests {
+		got := interpretCV(tc.cv)
+		if got != tc.expected {
+			t.Errorf("interpretCV(%v): got %q, expected %q", tc.cv, got, tc.expected)
+		}
+	}
+}
+
+func TestCVWithNegativeData(t *testing.T) {
+	data := []float64{-10, -5, 0, 5, 10, 20, 30}
+	stats, err := computeStats(data, nil, 1.5)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if !stats.HasNegativeData {
+		t.Error("HasNegativeData: got false, expected true")
+	}
+}
+
+func TestCVWithMeanNearZero(t *testing.T) {
+	data := []float64{-1, 0, 1}
+	stats, err := computeStats(data, nil, 1.5)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if stats.CVValid {
+		t.Error("CVValid: got true, expected false")
+	}
+}
+
+func TestCVSingleValue(t *testing.T) {
+	stats, err := computeStats([]float64{42.5}, nil, 1.5)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	// StdDev=0, Mean=42.5 → CV=0%
+	if !stats.CVValid {
+		t.Error("CVValid: got false, expected true")
+	}
+	if !floatEquals(stats.CV, 0) {
+		t.Errorf("CV: got %v, expected 0", stats.CV)
+	}
+}
+
 func TestReadNumbersEmpty(t *testing.T) {
 	reader := strings.NewReader("")
 	numbers, err := readNumbers(reader)

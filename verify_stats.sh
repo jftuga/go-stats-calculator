@@ -62,6 +62,10 @@ printf "%-20s %.10f\n" "Sum of Sq Dev:" "$SSQ"
 printf "%-20s %.10f\n" "Variance (n-1):" "$VARIANCE"
 printf "%-20s %.10f\n" "Std Deviation:" "$STDDEV"
 
+# Coefficient of Variation
+CV=$(echo "scale=10; ($STDDEV / $MEAN) * 100" | bc -l)
+printf "%-20s %.10f%%\n" "CV:" "$CV"
+
 # Percentile calculations
 # Formula: rank = p * (n-1), then linear interpolation
 echo ""
@@ -175,6 +179,7 @@ PROG_Q3=$(extract_value "Quartile 3")
 PROG_P95=$(echo "$PROGRAM_OUTPUT" | grep "p95" | awk '{print $NF}')
 PROG_P99=$(echo "$PROGRAM_OUTPUT" | grep "p99" | awk '{print $NF}')
 PROG_IQR=$(extract_value "IQR:")
+PROG_CV=$(echo "$PROGRAM_OUTPUT" | grep "^CV:" | awk '{print $2}' | tr -d '%')
 PROG_MIN=$(extract_value "Min:")
 PROG_MAX=$(extract_value "Max:")
 
@@ -223,6 +228,7 @@ compare_values "Q3 (p75)" "$Q3" "$PROG_Q3"
 compare_values "P95" "$P95" "$PROG_P95"
 compare_values "P99" "$P99" "$PROG_P99"
 compare_values "IQR" "$IQR" "$PROG_IQR"
+compare_values "CV (%)" "$CV" "$PROG_CV"
 echo ""
 
 if [[ $FAILURES -eq 0 ]]; then
