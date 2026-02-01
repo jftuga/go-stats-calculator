@@ -28,6 +28,7 @@ The calculator computes the following statistics:
 -   **Custom Percentiles**: Compute any percentile(s) between 0 and 100 using the `-p` flag.
 -   **Interquartile Range (IQR)**: The range between the first and third quartiles (Q3 - Q1).
 -   **Skewness**: A formal measure of the asymmetry of the data distribution.
+-   **Kurtosis**: Excess kurtosis measuring the "tailedness" of the distribution. Values near 0 indicate normal-like tails, negative values indicate thin tails, and positive values indicate heavy tails.
 -   **Coefficient of Variation (CV)**: The ratio of the standard deviation to the mean, expressed as a percentage. Useful for comparing variability across datasets with different units or scales.
 -   **Outliers**: Data points identified as abnormally distant from other values, using the IQR method with a configurable multiplier (`-k` flag).
 
@@ -194,6 +195,7 @@ Percentile (p95): 36.801
 Percentile (p99): 38.5202
 IQR:              6.03
 Skewness:         1.6862 (Highly Right Skewed)
+Kurtosis:         2.2437 (Leptokurtic - peaked, heavy tails)
 Outliers:         [35.88 38.95]
 ```
 
@@ -217,6 +219,7 @@ Outliers:         [35.88 38.95]
 | **Percentile (pN)** | Custom percentiles requested via the `-p` flag. The value below which N% of the data falls.                                                                              |
 | **IQR**           | The Interquartile Range (`Q3 - Q1`). It represents the middle 50% of the data and is a robust measure of spread.                                                           |
 | **Skewness**      | A measure of asymmetry. A value near 0 is symmetrical. A positive value indicates a "right skew" (a long tail of high values). A negative value indicates a "left skew".   |
+| **Kurtosis**      | Excess kurtosis measuring the "tailedness" of the distribution. Values < -1 are platykurtic (flat, thin tails), between -1 and 1 are mesokurtic (normal-like), and > 1 are leptokurtic (peaked, heavy tails). |
 | **Outliers**      | Values that fall outside the range of `Q1 - k*IQR` and `Q3 + k*IQR`, where `k` defaults to 1.5 and can be adjusted with the `-k` flag.                                      |
 
 ## Testing and Correctness
