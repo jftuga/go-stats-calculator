@@ -171,7 +171,7 @@ for val in $DATA; do
     if [[ "$IS_OUTLIER" == "1" ]]; then
         printf "  %s has Z=%.4f > %s (OUTLIER)\n" "$val" "$Z" "$Z_THRESHOLD"
         Z_OUTLIERS="$Z_OUTLIERS $val"
-        ((Z_OUTLIER_COUNT++))
+        Z_OUTLIER_COUNT=$((Z_OUTLIER_COUNT + 1))
     fi
 done
 if [[ $Z_OUTLIER_COUNT -eq 0 ]]; then
@@ -239,7 +239,7 @@ compare_values() {
     # Handle empty values
     if [[ -z "$prog_val" ]]; then
         printf "| %-12s | %15s | %15s | %-6s |\n" "$name" "$bc_val" "N/A" "SKIP"
-        ((FAILURES++))
+        FAILURES=$((FAILURES + 1))
         return
     fi
 
@@ -250,7 +250,7 @@ compare_values() {
         printf "| %-12s | %15.4f | %15s | %-6s |\n" "$name" "$bc_val" "$prog_val" "✓"
     else
         printf "| %-12s | %15.4f | %15s | %-6s |\n" "$name" "$bc_val" "$prog_val" "✗"
-        ((FAILURES++))
+        FAILURES=$((FAILURES + 1))
     fi
 }
 
@@ -289,7 +289,7 @@ if [[ -n "$PROG_Z_LINE" ]]; then
     compare_values "Z-Outliers" "$Z_OUTLIER_COUNT" "$PROG_Z_COUNT"
 else
     printf "| %-12s | %15s | %15s | %-6s |\n" "Z-Outliers" "$Z_OUTLIER_COUNT" "N/A" "SKIP"
-    ((FAILURES++))
+    FAILURES=$((FAILURES + 1))
 fi
 echo ""
 
