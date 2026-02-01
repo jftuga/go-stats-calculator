@@ -31,6 +31,7 @@ The calculator computes the following statistics:
 -   **Kurtosis**: Excess kurtosis measuring the "tailedness" of the distribution. Values near 0 indicate normal-like tails, negative values indicate thin tails, and positive values indicate heavy tails.
 -   **Coefficient of Variation (CV)**: The ratio of the standard deviation to the mean, expressed as a percentage. Useful for comparing variability across datasets with different units or scales.
 -   **Outliers**: Data points identified as abnormally distant from other values, using the IQR method with a configurable multiplier (`-k` flag).
+-   **Z-Score Outliers**: Optional outlier detection using Z-score method, flagging data points more than a configurable number of standard deviations from the mean (`-z` flag). Ideal for normally distributed data.
 -   **Histogram**: A single-line Unicode histogram showing the distribution of values across configurable bins (`-b` flag).
 -   **Trendline**: A single-line Unicode trendline showing the sequence pattern of values in their original input order, using configurable bins (`-b` flag).
 
@@ -166,6 +167,49 @@ Use the `-b` flag to control the number of bins in the histogram and trendline. 
 ./stats -b 10 -k 2.0 -p "10,90" data.txt
 ```
 
+### 6. Z-Score Outlier Detection
+
+Use the `-z` flag to enable Z-score based outlier detection. A data point is flagged when its Z-score (number of standard deviations from the mean) exceeds the given threshold. This method is disabled by default and complements the always-shown IQR method.
+
+**IQR vs Z-Score — when to use which:**
+
+The default IQR method uses quartiles and makes no assumptions about the shape of your data, so it works well for skewed distributions, small samples, or data you haven't explored yet. The Z-score method measures distance from the mean in standard deviations and assumes data is roughly normally distributed.
+
+Consider using `-z` when:
+- Your data is approximately bell-shaped (e.g., measurement errors, test scores, sensor readings).
+- You want outlier detection tied to a specific confidence level (Z>2 ≈ 95%, Z>3 ≈ 99.7%).
+- You want to cross-check IQR results with a second method — values flagged by both are strong outlier candidates.
+
+Stick with the default IQR method when:
+- Your data is skewed, heavy-tailed, or you're unsure of the distribution.
+- The sample size is small (Z-scores rely on mean and standard deviation, which are sensitive to outliers themselves).
+- You need a single, assumption-free approach.
+
+**Syntax:**
+```bash
+./stats -z <threshold> <filename>
+```
+
+**Examples:**
+```bash
+# Flag values more than 2 standard deviations from the mean
+./stats -z 2.0 data.txt
+
+# Stricter threshold (fewer outliers flagged)
+./stats -z 3.0 data.txt
+
+# Combined with other flags
+./stats -z 2.5 -k 2.0 -p "10,90" data.txt
+```
+
+**Common Z-score thresholds:**
+
+| Threshold | Description |
+| :-------- | :---------- |
+| **2.0** | Flags values beyond ~95.4% of a normal distribution. Good for exploratory analysis. |
+| **2.5** | A moderate threshold, balancing sensitivity and specificity. |
+| **3.0** | Flags values beyond ~99.7% of a normal distribution. Conservative, suitable for large datasets. |
+
 **Common multiplier values:**
 
 | Multiplier | Description |
@@ -197,7 +241,7 @@ Given a file named `sample_data.txt` with the following content:
 20.11
 ```
 
-Running the command `./stats sample_data.txt` will produce the following output:
+Running the command `./stats -z 2.0 sample_data.txt` will produce the following output:
 
 ```
 --- Descriptive Statistics ---
@@ -223,6 +267,7 @@ IQR:              6.03
 Skewness:         1.6862 (Highly Right Skewed)
 Kurtosis:         2.2437 (Leptokurtic - peaked, heavy tails)
 Outliers:         [35.88 38.95]
+Z-Outliers (Z>2): [35.88 38.95]
 
 --- Distribution ---
 Histogram:        █▄▂▆▂▂▂▁▁▁▁▁▁▁▂▂
@@ -253,6 +298,7 @@ The **Histogram** shows *distribution* — how values are spread across bins fro
 | **Skewness**      | A measure of asymmetry. A value near 0 is symmetrical. A positive value indicates a "right skew" (a long tail of high values). A negative value indicates a "left skew".   |
 | **Kurtosis**      | Excess kurtosis measuring the "tailedness" of the distribution. Values < -1 are platykurtic (flat, thin tails), between -1 and 1 are mesokurtic (normal-like), and > 1 are leptokurtic (peaked, heavy tails). |
 | **Outliers**      | Values that fall outside the range of `Q1 - k*IQR` and `Q3 + k*IQR`, where `k` defaults to 1.5 and can be adjusted with the `-k` flag.                                      |
+| **Z-Score Outliers** | Values whose Z-score (number of standard deviations from the mean) exceeds the threshold set with the `-z` flag. Only shown when `-z` is provided. Ideal for normally distributed data. |
 | **Histogram**     | A single-line Unicode histogram showing data distribution across bins. Each character represents a bin, with taller blocks indicating more values. Bin count is configurable with the `-b` flag (default 16). |
 | **Trendline**     | A single-line Unicode trendline showing the sequence pattern of values in their original input order. Data is divided into equal chunks, each averaged and mapped to a block character. Bin count is configurable with the `-b` flag (default 16). |
 
