@@ -31,6 +31,7 @@ The calculator computes the following statistics:
 -   **Kurtosis**: Excess kurtosis measuring the "tailedness" of the distribution. Values near 0 indicate normal-like tails, negative values indicate thin tails, and positive values indicate heavy tails.
 -   **Coefficient of Variation (CV)**: The ratio of the standard deviation to the mean, expressed as a percentage. Useful for comparing variability across datasets with different units or scales.
 -   **Outliers**: Data points identified as abnormally distant from other values, using the IQR method with a configurable multiplier (`-k` flag).
+-   **Sparkline Histogram**: A single-line Unicode sparkline showing the distribution of values across configurable bins (`-b` flag).
 
 All numeric output uses full decimal notation (no scientific notation) with trailing zeros trimmed for readability.
 
@@ -140,6 +141,30 @@ Use the `-k` flag to adjust the IQR multiplier used for outlier detection. The d
 ./stats -k 2.0 -p "10,90" data.txt
 ```
 
+### 5. Sparkline Bins
+
+Use the `-b` flag to control the number of bins in the sparkline histogram. The default is `16`, and valid values range from `5` to `50`.
+
+**Syntax:**
+```bash
+./stats -b <bins> <filename>
+```
+
+**Examples:**
+```bash
+# Default 16 bins
+./stats data.txt
+
+# Fewer bins for a coarser view
+./stats -b 8 data.txt
+
+# More bins for finer detail
+./stats -b 32 data.txt
+
+# Combined with other flags
+./stats -b 10 -k 2.0 -p "10,90" data.txt
+```
+
 **Common multiplier values:**
 
 | Multiplier | Description |
@@ -197,6 +222,9 @@ IQR:              6.03
 Skewness:         1.6862 (Highly Right Skewed)
 Kurtosis:         2.2437 (Leptokurtic - peaked, heavy tails)
 Outliers:         [35.88 38.95]
+
+--- Distribution ---
+Sparkline:        █▄▂▆▂▂▂▁▁▁▁▁▁▁▂▂
 ```
 
 ## Understanding the Output
@@ -221,6 +249,7 @@ Outliers:         [35.88 38.95]
 | **Skewness**      | A measure of asymmetry. A value near 0 is symmetrical. A positive value indicates a "right skew" (a long tail of high values). A negative value indicates a "left skew".   |
 | **Kurtosis**      | Excess kurtosis measuring the "tailedness" of the distribution. Values < -1 are platykurtic (flat, thin tails), between -1 and 1 are mesokurtic (normal-like), and > 1 are leptokurtic (peaked, heavy tails). |
 | **Outliers**      | Values that fall outside the range of `Q1 - k*IQR` and `Q3 + k*IQR`, where `k` defaults to 1.5 and can be adjusted with the `-k` flag.                                      |
+| **Sparkline**     | A single-line Unicode histogram showing data distribution across bins. Each character represents a bin, with taller blocks indicating more values. Bin count is configurable with the `-b` flag (default 16). |
 
 ## Testing and Correctness
 

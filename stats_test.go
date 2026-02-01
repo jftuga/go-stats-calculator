@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -35,7 +36,7 @@ var testData = []float64{
 }
 
 func TestComputeStats(t *testing.T) {
-	stats, err := computeStats(testData, nil, 1.5)
+	stats, err := computeStats(testData, nil, 1.5, 16)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -88,14 +89,14 @@ func TestComputeStats(t *testing.T) {
 }
 
 func TestComputeStatsEmptyInput(t *testing.T) {
-	_, err := computeStats([]float64{}, nil, 1.5)
+	_, err := computeStats([]float64{}, nil, 1.5, 16)
 	if err == nil {
 		t.Error("expected error for empty input, got nil")
 	}
 }
 
 func TestComputeStatsSingleValue(t *testing.T) {
-	stats, err := computeStats([]float64{42.5}, nil, 1.5)
+	stats, err := computeStats([]float64{42.5}, nil, 1.5, 16)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -124,7 +125,7 @@ func TestComputeStatsSingleValue(t *testing.T) {
 func TestComputeStatsMultipleMode(t *testing.T) {
 	// 5 and 10 both appear twice
 	data := []float64{5, 5, 10, 10, 15}
-	stats, err := computeStats(data, nil, 1.5)
+	stats, err := computeStats(data, nil, 1.5, 16)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -138,7 +139,7 @@ func TestComputeStatsMultipleMode(t *testing.T) {
 func TestComputeStatsNoMode(t *testing.T) {
 	// All values unique - no mode
 	data := []float64{1, 2, 3, 4, 5}
-	stats, err := computeStats(data, nil, 1.5)
+	stats, err := computeStats(data, nil, 1.5, 16)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -338,7 +339,7 @@ func TestComputeStatsCustomIQRMultiplier(t *testing.T) {
 	// lowerBound = 27.5 - 3.0*45.125 = -108.875
 	// upperBound = 72.625 + 3.0*45.125 = 208.0
 	// 150 < 208.0, so no outliers
-	stats, err := computeStats(testData, nil, 3.0)
+	stats, err := computeStats(testData, nil, 3.0, 16)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -350,7 +351,7 @@ func TestComputeStatsCustomIQRMultiplier(t *testing.T) {
 	// lowerBound = 27.5 - 1.0*45.125 = -17.625
 	// upperBound = 72.625 + 1.0*45.125 = 117.75
 	// 150 > 117.75, so 150 is an outlier (same as default for this dataset)
-	stats, err = computeStats(testData, nil, 1.0)
+	stats, err = computeStats(testData, nil, 1.0, 16)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -360,7 +361,7 @@ func TestComputeStatsCustomIQRMultiplier(t *testing.T) {
 }
 
 func TestCVForTestData(t *testing.T) {
-	stats, err := computeStats(testData, nil, 1.5)
+	stats, err := computeStats(testData, nil, 1.5, 16)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -396,7 +397,7 @@ func TestInterpretCV(t *testing.T) {
 
 func TestCVWithNegativeData(t *testing.T) {
 	data := []float64{-10, -5, 0, 5, 10, 20, 30}
-	stats, err := computeStats(data, nil, 1.5)
+	stats, err := computeStats(data, nil, 1.5, 16)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -407,7 +408,7 @@ func TestCVWithNegativeData(t *testing.T) {
 
 func TestCVWithMeanNearZero(t *testing.T) {
 	data := []float64{-1, 0, 1}
-	stats, err := computeStats(data, nil, 1.5)
+	stats, err := computeStats(data, nil, 1.5, 16)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -417,7 +418,7 @@ func TestCVWithMeanNearZero(t *testing.T) {
 }
 
 func TestCVSingleValue(t *testing.T) {
-	stats, err := computeStats([]float64{42.5}, nil, 1.5)
+	stats, err := computeStats([]float64{42.5}, nil, 1.5, 16)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -438,5 +439,57 @@ func TestReadNumbersEmpty(t *testing.T) {
 	}
 	if len(numbers) != 0 {
 		t.Errorf("expected empty slice, got %v", numbers)
+	}
+}
+
+func TestGenerateSparkline(t *testing.T) {
+	sorted := make([]float64, len(testData))
+	copy(sorted, testData)
+	sort.Float64s(sorted)
+	result := generateSparkline(sorted, 16)
+	if len([]rune(result)) != 16 {
+		t.Errorf("expected 16 runes, got %d", len([]rune(result)))
+	}
+	blocks := "▁▂▃▄▅▆▇█"
+	for _, r := range result {
+		if !strings.ContainsRune(blocks, r) {
+			t.Errorf("invalid sparkline character: %c", r)
+		}
+	}
+}
+
+func TestGenerateSparklineUniform(t *testing.T) {
+	data := make([]float64, 16)
+	for i := range data {
+		data[i] = float64(i + 1)
+	}
+	result := generateSparkline(data, 16)
+	expected := "████████████████"
+	if result != expected {
+		t.Errorf("expected all full blocks, got %q", result)
+	}
+}
+
+func TestGenerateSparklineSingleValue(t *testing.T) {
+	result := generateSparkline([]float64{42}, 16)
+	if result != "" {
+		t.Errorf("expected empty string for single value, got %q", result)
+	}
+}
+
+func TestGenerateSparklineAllIdentical(t *testing.T) {
+	result := generateSparkline([]float64{5, 5, 5, 5}, 16)
+	if result != "" {
+		t.Errorf("expected empty string for identical values, got %q", result)
+	}
+}
+
+func TestGenerateSparklineCustomBins(t *testing.T) {
+	sorted := make([]float64, len(testData))
+	copy(sorted, testData)
+	sort.Float64s(sorted)
+	result := generateSparkline(sorted, 8)
+	if len([]rune(result)) != 8 {
+		t.Errorf("expected 8 runes, got %d", len([]rune(result)))
 	}
 }
