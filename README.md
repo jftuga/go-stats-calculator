@@ -34,6 +34,7 @@ The calculator computes the following statistics:
 -   **Z-Score Outliers**: Optional outlier detection using Z-score method, flagging data points more than a configurable number of standard deviations from the mean (`-z` flag). Ideal for normally distributed data.
 -   **Histogram**: A single-line Unicode histogram showing the distribution of values across configurable bins (`-b` flag).
 -   **Trendline**: A single-line Unicode trendline showing the sequence pattern of values in their original input order, using configurable bins (`-b` flag).
+-   **Trimmed Mean**: A robust measure of central tendency that removes a configurable percentage from each tail (`-t` flag). Less sensitive to outliers than the regular mean while using more data than the median.
 -   **Log Transform**: Optional natural log (ln) transform applied to all input data before computing statistics (`-l` flag). Useful for heavy-tailed data spanning several orders of magnitude (file sizes, latencies, income data). Requires all values to be positive.
 
 All numeric output uses full decimal notation (no scientific notation) with trailing zeros trimmed for readability.
@@ -219,7 +220,40 @@ Stick with the default IQR method when:
 | **1.5** | Standard (default). Tukey's inner fences, the widely accepted general-purpose threshold. |
 | **3.0** | Tukey's outer fences, the standard threshold for extreme or "far out" outliers. Only the most anomalous points are flagged. |
 
-### 7. Log Transform
+### 7. Trimmed Mean
+
+Use the `-t` flag to compute a trimmed mean. The trimmed mean removes a specified percentage of values from each end of the sorted dataset before averaging, making it more resistant to outliers than the regular mean while incorporating more data than the median.
+
+For example, `-t 5` removes 5% from each end (10% total), and `-t 10` removes 10% from each end (20% total).
+
+**Syntax:**
+```bash
+./stats -t <percentage> <filename>
+```
+
+**Examples:**
+```bash
+# Remove 5% from each tail before averaging
+./stats -t 5 data.txt
+
+# Remove 10% from each tail (common choice)
+./stats -t 10 data.txt
+
+# Combined with other flags
+./stats -t 10 -z 2.0 -p "10,90" data.txt
+```
+
+**Common trim percentages:**
+
+| Percentage | Description |
+| :--------- | :---------- |
+| **5%** | Light trimming. Removes a small number of extreme values. |
+| **10%** | Moderate trimming. A widely used default in robust statistics. |
+| **25%** | Heavy trimming. The 25% trimmed mean equals the interquartile mean. |
+
+**Note on log transform interaction:** When used with `-l`, the trimmed mean is computed on the log-transformed values, consistent with how all other statistics behave.
+
+### 8. Log Transform
 
 Use the `-l` flag to apply a natural log (ln) transform to all input values before computing statistics. Every number in the input is replaced with its natural logarithm, and then all statistics (mean, median, standard deviation, outliers, etc.) are calculated on those transformed values.
 
@@ -342,6 +376,7 @@ The **Histogram** shows *distribution* — how values are spread across bins fro
 | **Min**           | The smallest number in the dataset.                                                                                                                                        |
 | **Max**           | The largest number in the dataset.                                                                                                                                         |
 | **Mean**          | The "average" value. Highly sensitive to outliers.                                                                                                                         |
+| **Trimmed Mean**  | The mean after removing a percentage of values from each tail of the sorted dataset. Only shown when `-t` is used. More robust than the mean against outliers while using more of the data than the median. |
 | **Median (p50)**  | The middle value of the sorted dataset. Represents the "typical" value and is robust against outliers.                                                                     |
 | **Mode**          | The number(s) that occur most frequently. If no number repeats, the mode is "None".                                                                                        |
 | **Std Deviation** | Measures how spread out the numbers are from the mean. A low value indicates data is clustered tightly; a high value indicates data is spread out.                         |

@@ -20,7 +20,7 @@ const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
 
-const PgmVersion string = "1.8.0"
+const PgmVersion string = "1.9.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
@@ -49,6 +49,8 @@ type Stats struct {
 	CustomPercentiles map[float64]float64 // User-requested percentiles
 	Histogram         string              // Unicode histogram showing distribution
 	Trendline         string              // Unicode trendline showing sequence pattern
+	TrimmedMean       float64
+	TrimmedMeanPct    float64 // 0 = disabled
 }
 
 func main() {
@@ -64,6 +66,7 @@ func main() {
 	numBins := flag.Int("b", 16, "number of bins for histogram and trendline (5-50)")
 	zScoreThreshold := flag.Float64("z", 0, "Z-score threshold for outlier detection (e.g., 2.0, 2.5, 3.0; disabled by default)")
 	logTransform := flag.Bool("l", false, "apply natural log (ln) transform to input data")
+	trimPct := flag.Float64("t", 0, "trimmed mean percentage to remove from each tail (0-50)")
 	flag.Parse()
 
 	if *numBins < 5 || *numBins > 50 {
@@ -73,6 +76,11 @@ func main() {
 
 	if *zScoreThreshold != 0 && *zScoreThreshold < 1.0 {
 		fmt.Fprintf(os.Stderr, "Error: Z-score threshold must be >= 1.0, got %v\n", *zScoreThreshold)
+		os.Exit(1)
+	}
+
+	if *trimPct < 0 || *trimPct > 50 {
+		fmt.Fprintf(os.Stderr, "Error: trim percentage must be between 0 and 50, got %v\n", *trimPct)
 		os.Exit(1)
 	}
 
@@ -134,7 +142,7 @@ func main() {
 		}
 	}
 
-	stats, err := computeStats(numbers, customPercentiles, *iqrMultiplier, *numBins, *zScoreThreshold)
+	stats, err := computeStats(numbers, customPercentiles, *iqrMultiplier, *numBins, *zScoreThreshold, *trimPct)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error computing stats: %v\n", err)
 		os.Exit(1)
@@ -149,6 +157,12 @@ func main() {
 	}
 	if *zScoreThreshold > 0 {
 		label := fmt.Sprintf("Z-Outliers (Z>%s):", formatFloat(*zScoreThreshold))
+		if len(label) > labelWidth {
+			labelWidth = len(label)
+		}
+	}
+	if *trimPct > 0 {
+		label := fmt.Sprintf("Trimmed Mean (%s%%):", formatFloat(*trimPct))
 		if len(label) > labelWidth {
 			labelWidth = len(label)
 		}
@@ -202,7 +216,7 @@ func applyLogTransform(numbers []float64) ([]float64, error) {
 }
 
 // computeStats calculates all the desired statistics for a slice of numbers.
-func computeStats(data []float64, customPercentiles []float64, iqrMultiplier float64, numBins int, zScoreThreshold float64) (*Stats, error) {
+func computeStats(data []float64, customPercentiles []float64, iqrMultiplier float64, numBins int, zScoreThreshold float64, trimPct float64) (*Stats, error) {
 	count := len(data)
 	if count == 0 {
 		return nil, fmt.Errorf("input contains no valid numbers")
@@ -227,6 +241,22 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 	}
 	stats.Sum = sum
 	stats.Mean = sum / float64(count)
+
+	// --- Trimmed Mean ---
+	if trimPct > 0 {
+		trimCount := int(math.Floor(float64(count) * trimPct / 100.0))
+		remaining := count - 2*trimCount
+		if remaining < 1 {
+			return nil, fmt.Errorf("dataset too small (%d values) to trim %.4g%% from each end", count, trimPct)
+		}
+		trimmed := sortedData[trimCount : count-trimCount]
+		var trimSum float64
+		for _, v := range trimmed {
+			trimSum += v
+		}
+		stats.TrimmedMean = trimSum / float64(remaining)
+		stats.TrimmedMeanPct = trimPct
+	}
 
 	// --- Variance and Standard Deviation ---
 	if count > 1 {
@@ -573,6 +603,10 @@ func printStats(s *Stats, labelWidth int) {
 	fmt.Printf("%s%s\n", padLabel("Max:", labelWidth), formatFloat(s.Max))
 	fmt.Println("\n--- Measures of Central Tendency ---")
 	fmt.Printf("%s%s\n", padLabel("Mean:", labelWidth), formatFloat(s.Mean))
+	if s.TrimmedMeanPct > 0 {
+		label := fmt.Sprintf("Trimmed Mean (%s%%):", formatFloat(s.TrimmedMeanPct))
+		fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloat(s.TrimmedMean))
+	}
 	fmt.Printf("%s%s\n", padLabel("Median (p50):", labelWidth), formatFloat(s.Median))
 
 	switch len(s.Mode) {
