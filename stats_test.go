@@ -36,7 +36,7 @@ var testData = []float64{
 }
 
 func TestComputeStats(t *testing.T) {
-	stats, err := computeStats(testData, nil, 1.5, 16, 0)
+	stats, err := computeStats(testData, nil, 1.5, 16, 0, 0)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -89,14 +89,14 @@ func TestComputeStats(t *testing.T) {
 }
 
 func TestComputeStatsEmptyInput(t *testing.T) {
-	_, err := computeStats([]float64{}, nil, 1.5, 16, 0)
+	_, err := computeStats([]float64{}, nil, 1.5, 16, 0, 0)
 	if err == nil {
 		t.Error("expected error for empty input, got nil")
 	}
 }
 
 func TestComputeStatsSingleValue(t *testing.T) {
-	stats, err := computeStats([]float64{42.5}, nil, 1.5, 16, 0)
+	stats, err := computeStats([]float64{42.5}, nil, 1.5, 16, 0, 0)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestComputeStatsSingleValue(t *testing.T) {
 func TestComputeStatsMultipleMode(t *testing.T) {
 	// 5 and 10 both appear twice
 	data := []float64{5, 5, 10, 10, 15}
-	stats, err := computeStats(data, nil, 1.5, 16, 0)
+	stats, err := computeStats(data, nil, 1.5, 16, 0, 0)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestComputeStatsMultipleMode(t *testing.T) {
 func TestComputeStatsNoMode(t *testing.T) {
 	// All values unique - no mode
 	data := []float64{1, 2, 3, 4, 5}
-	stats, err := computeStats(data, nil, 1.5, 16, 0)
+	stats, err := computeStats(data, nil, 1.5, 16, 0, 0)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestComputeStatsCustomIQRMultiplier(t *testing.T) {
 	// lowerBound = 27.5 - 3.0*45.125 = -108.875
 	// upperBound = 72.625 + 3.0*45.125 = 208.0
 	// 150 < 208.0, so no outliers
-	stats, err := computeStats(testData, nil, 3.0, 16, 0)
+	stats, err := computeStats(testData, nil, 3.0, 16, 0, 0)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestComputeStatsCustomIQRMultiplier(t *testing.T) {
 	// lowerBound = 27.5 - 1.0*45.125 = -17.625
 	// upperBound = 72.625 + 1.0*45.125 = 117.75
 	// 150 > 117.75, so 150 is an outlier (same as default for this dataset)
-	stats, err = computeStats(testData, nil, 1.0, 16, 0)
+	stats, err = computeStats(testData, nil, 1.0, 16, 0, 0)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -361,7 +361,7 @@ func TestComputeStatsCustomIQRMultiplier(t *testing.T) {
 }
 
 func TestCVForTestData(t *testing.T) {
-	stats, err := computeStats(testData, nil, 1.5, 16, 0)
+	stats, err := computeStats(testData, nil, 1.5, 16, 0, 0)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestInterpretCV(t *testing.T) {
 
 func TestCVWithNegativeData(t *testing.T) {
 	data := []float64{-10, -5, 0, 5, 10, 20, 30}
-	stats, err := computeStats(data, nil, 1.5, 16, 0)
+	stats, err := computeStats(data, nil, 1.5, 16, 0, 0)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -408,7 +408,7 @@ func TestCVWithNegativeData(t *testing.T) {
 
 func TestCVWithMeanNearZero(t *testing.T) {
 	data := []float64{-1, 0, 1}
-	stats, err := computeStats(data, nil, 1.5, 16, 0)
+	stats, err := computeStats(data, nil, 1.5, 16, 0, 0)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -418,7 +418,7 @@ func TestCVWithMeanNearZero(t *testing.T) {
 }
 
 func TestCVSingleValue(t *testing.T) {
-	stats, err := computeStats([]float64{42.5}, nil, 1.5, 16, 0)
+	stats, err := computeStats([]float64{42.5}, nil, 1.5, 16, 0, 0)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -543,7 +543,7 @@ func TestGenerateTrendlineCustomBins(t *testing.T) {
 func TestZScoreOutliers(t *testing.T) {
 	// With z=2.0: 150 has Z=(150-51.7258)/33.5751=2.926 > 2.0, so flagged
 	t.Run("Threshold2.0", func(t *testing.T) {
-		stats, err := computeStats(testData, nil, 1.5, 16, 2.0)
+		stats, err := computeStats(testData, nil, 1.5, 16, 2.0, 0)
 		if err != nil {
 			t.Fatalf("computeStats returned error: %v", err)
 		}
@@ -558,7 +558,7 @@ func TestZScoreOutliers(t *testing.T) {
 
 	// With z=3.0: 150 has Z=2.926 < 3.0, so no outliers
 	t.Run("Threshold3.0", func(t *testing.T) {
-		stats, err := computeStats(testData, nil, 1.5, 16, 3.0)
+		stats, err := computeStats(testData, nil, 1.5, 16, 3.0, 0)
 		if err != nil {
 			t.Fatalf("computeStats returned error: %v", err)
 		}
@@ -569,7 +569,7 @@ func TestZScoreOutliers(t *testing.T) {
 }
 
 func TestZScoreDisabled(t *testing.T) {
-	stats, err := computeStats(testData, nil, 1.5, 16, 0)
+	stats, err := computeStats(testData, nil, 1.5, 16, 0, 0)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -582,7 +582,7 @@ func TestZScoreDisabled(t *testing.T) {
 }
 
 func TestZScoreZeroStdDev(t *testing.T) {
-	stats, err := computeStats([]float64{5, 5, 5}, nil, 1.5, 16, 2.0)
+	stats, err := computeStats([]float64{5, 5, 5}, nil, 1.5, 16, 2.0, 0)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -604,7 +604,7 @@ func TestApplyLogTransformPositiveValues(t *testing.T) {
 	}
 
 	// Verify stats on transformed data
-	stats, err := computeStats(result, nil, 1.5, 16, 0)
+	stats, err := computeStats(result, nil, 1.5, 16, 0, 0)
 	if err != nil {
 		t.Fatalf("computeStats returned error: %v", err)
 	}
@@ -630,5 +630,55 @@ func TestApplyLogTransformErrorOnNegative(t *testing.T) {
 	_, err := applyLogTransform(data)
 	if err == nil {
 		t.Error("expected error for negative value, got nil")
+	}
+}
+
+func TestTrimmedMean(t *testing.T) {
+	// testData has 31 values, trim=10%
+	// trimCount = floor(31 * 10 / 100) = 3, remaining = 25
+	// sorted[3:28] sum = 1242.75, mean = 49.71
+	stats, err := computeStats(testData, nil, 1.5, 16, 0, 10)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if !floatEquals(stats.TrimmedMean, 49.71) {
+		t.Errorf("TrimmedMean: got %v, expected 49.71", stats.TrimmedMean)
+	}
+	if !floatEquals(stats.TrimmedMeanPct, 10) {
+		t.Errorf("TrimmedMeanPct: got %v, expected 10", stats.TrimmedMeanPct)
+	}
+}
+
+func TestTrimmedMeanDisabled(t *testing.T) {
+	stats, err := computeStats(testData, nil, 1.5, 16, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if stats.TrimmedMeanPct != 0 {
+		t.Errorf("TrimmedMeanPct: got %v, expected 0", stats.TrimmedMeanPct)
+	}
+	if stats.TrimmedMean != 0 {
+		t.Errorf("TrimmedMean: got %v, expected 0", stats.TrimmedMean)
+	}
+}
+
+func TestTrimmedMeanDatasetTooSmall(t *testing.T) {
+	// 4 values with trim=50%: trimCount = floor(4 * 50/100) = 2, remaining = 0 → error
+	_, err := computeStats([]float64{1, 2, 3, 4}, nil, 1.5, 16, 0, 50)
+	if err == nil {
+		t.Error("expected error for dataset too small to trim, got nil")
+	}
+}
+
+func TestTrimmedMeanSmallTrim(t *testing.T) {
+	// 5 values with trim=5%: trimCount = floor(5 * 5/100) = floor(0.25) = 0
+	// No trimming occurs, result equals regular mean
+	data := []float64{1, 2, 3, 4, 5}
+	stats, err := computeStats(data, nil, 1.5, 16, 0, 5)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if !floatEquals(stats.TrimmedMean, stats.Mean) {
+		t.Errorf("TrimmedMean: got %v, expected %v (same as Mean)", stats.TrimmedMean, stats.Mean)
 	}
 }

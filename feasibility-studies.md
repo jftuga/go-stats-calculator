@@ -2,18 +2,75 @@
 
 ## Summary Ranking
 
-Of the six features studied, ranked by fit and value for this tool:
+Of the seven features studied, ranked by fit and value for this tool:
 
 | Rank | Feature | Recommendation |
 |:-----|:--------|:---------------|
-| 1 | **Kurtosis** | Easiest win. Mirrors existing skewness pattern exactly. Pairs naturally with skewness to describe distribution shape. |
-| 2 | **Histogram** | Highest visual impact, simple implementation. Surfaces distribution shape (bimodality, skew) that numbers alone hide. |
-| 3 | **Z-Score Outlier Detection** | Best algorithmic fit, lowest cost, clearest value. Complements existing IQR detection. |
-| 4 | **Log Transformation** | Good fit, minimal code, real use case for heavy-tailed data. |
-| 5 | **Moving Averages / Rolling Windows** | Useful but introduces philosophical tension -- transforms data rather than describing it. |
-| 6 | **Sample vs. Population Variance** | Skip. The current `N-1` default is already correct for the target audience. |
+| 1 | **Trimmed Mean** | Fills a real gap between mean (outlier-sensitive) and median (ignores distribution shape). Minimal code, uses existing sorted data, and complements the outlier detection already in the tool. |
+| 2 | **Kurtosis** | *(Implemented)* Easiest win. Mirrors existing skewness pattern exactly. Pairs naturally with skewness to describe distribution shape. |
+| 3 | **Histogram** | *(Implemented)* Highest visual impact, simple implementation. Surfaces distribution shape (bimodality, skew) that numbers alone hide. |
+| 4 | **Z-Score Outlier Detection** | *(Implemented)* Best algorithmic fit, lowest cost, clearest value. Complements existing IQR detection. |
+| 5 | **Log Transformation** | *(Implemented)* Good fit, minimal code, real use case for heavy-tailed data. |
+| 6 | **Moving Averages / Rolling Windows** | Useful but introduces philosophical tension -- transforms data rather than describing it. |
+| 7 | **Sample vs. Population Variance** | Skip. The current `N-1` default is already correct for the target audience. |
 
 A potential follow-up to the histogram: an **ASCII Box Plot** could be added later, especially if the tool ever supports comparing multiple datasets.
+
+---
+
+## Trimmed Mean
+
+### Question
+
+Given extreme outliers, a 5% or 10% trimmed mean might be more representative than the raw mean (e.g., 328 vs. ~275 for the main bulk of a dataset). Would using a `-t` flag plus a percentage be a good implementation strategy?
+
+### Analysis
+
+The trimmed mean fills a real gap between the existing **mean** (sensitive to outliers) and **median** (ignores all distribution shape). The tool already computes sorted data, percentiles, and outlier detection -- a trimmed mean is a natural complement. It gives users a robust central tendency measure that's more informative than the median but less distorted than the raw mean.
+
+**It fits the existing architecture well.** `computeStats()` already has `sortedData` available. The implementation is: slice off `floor(n * t/100)` elements from each end, average the remaining middle portion. Roughly 10 lines of actual logic.
+
+**The `-t <percentage>` flag is the right design.** It follows the established pattern of single-value numeric flags (`-k`, `-z`, `-b`). The standard convention is that the percentage trims from *each* end -- so `-t 5` trims 5% from the bottom and 5% from the top (10% total). This matches R's `mean(x, trim=0.05)` and SciPy's `scipy.stats.trim_mean`, which is what statisticians expect.
+
+**Validation bounds:** A sensible range would be `0 < t < 50`. At `t=0` it's just the regular mean (redundant), and `t=50` converges to the median (also redundant). Common real-world values are 5, 10, or 25.
+
+**Disabled by default.** Like `-z`, the flag defaults to 0 (not shown), so existing output is unchanged.
+
+#### Output Placement
+
+The trimmed mean belongs in the "Measures of Central Tendency" section, between Mean and Median:
+
+```
+Mean:              328.00
+Trimmed Mean (5%): 275.12
+Median (p50):      260.00
+```
+
+The label `Trimmed Mean (XX%):` could reach ~20 characters (e.g., `Trimmed Mean (25%):`), so it would need to be accounted for in the `labelWidth` calculation, following the same pattern used by custom percentiles and Z-outliers.
+
+#### Single Value vs. Comma-Separated List
+
+The existing flags follow a pattern: `-p` accepts comma-separated lists while `-k`, `-z`, and `-b` accept single values. A single value is more consistent for `-t`. Users who want to compare 5% and 10% trimmed means can run the tool twice.
+
+#### Edge Cases
+
+- **Dataset too small to trim.** For example, 10 values with `-t 25` trims 2 from each end (leaving 6 values -- fine). But `-t 40` on 5 values would leave just 1 value. The implementation should require at least 1 remaining value after trimming, producing an error otherwise.
+- **Rounding.** `floor(n * t/100)` handles fractional trim counts correctly -- for 15 values with `-t 5`, `floor(0.75) = 0`, so nothing is trimmed (the dataset is too small for 5% to remove even one value). This is standard behavior.
+
+#### Implementation Sketch
+
+1. Add `-t` flag: `flag.Float64("t", 0, "trimmed mean percentage to remove from each tail (0-50)")`
+2. Validate: `0 < t < 50`
+3. In `computeStats()`, after sorting:
+   - `trimCount := int(math.Floor(float64(count) * trimPct / 100.0))`
+   - Average `sortedData[trimCount : count-trimCount]`
+4. Store in `Stats` struct as `TrimmedMean float64` and `TrimmedMeanPct float64`
+5. Print in the central tendency section when `TrimmedMeanPct > 0`
+6. Account for the label width in `main()`
+
+#### My Take
+
+This is a well-scoped feature that fits the tool's philosophy of describing datasets. It's minimal code, uses data structures already in place, doesn't change existing behavior, and directly answers the question users implicitly ask when they see outliers flagged alongside a mean that feels too high (or too low). The `-t` flag with a single percentage value is the right approach.
 
 ---
 

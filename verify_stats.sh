@@ -2,6 +2,7 @@
 # verify_stats.sh - Independent verification of stats calculations using bc
 # Uses the same 31-number dataset from stats_test.go
 # Created on MacOS Sequoia 15.7.3
+# COMPATIBILITY: Must work with bash 5.2+ (GitHub Actions requirement)
 
 set -e
 
@@ -291,6 +292,49 @@ else
     printf "| %-12s | %15s | %15s | %-6s |\n" "Z-Outliers" "$Z_OUTLIER_COUNT" "N/A" "SKIP"
     FAILURES=$((FAILURES + 1))
 fi
+echo ""
+
+# --- Trimmed Mean Verification ---
+echo "=============================================="
+echo "Trimmed Mean Verification (trim=10%)"
+echo "=============================================="
+echo ""
+
+# trimCount = floor(31 * 10 / 100) = 3
+# Remove 3 from each end of sorted data, average remaining 25 values
+# Sorted indices 3..27 (0-based)
+TRIM_COUNT=3
+TRIM_REMAINING=$((COUNT - 2 * TRIM_COUNT))
+
+TRIM_SUM="0"
+for i in $(seq $TRIM_COUNT $((COUNT - TRIM_COUNT - 1))); do
+    TRIM_SUM=$(echo "scale=10; $TRIM_SUM + ${SORTED_ARRAY[$i]}" | bc -l)
+done
+TRIM_MEAN=$(echo "scale=10; $TRIM_SUM / $TRIM_REMAINING" | bc -l)
+printf "%-20s %s (from %d values, trimmed %d from each end)\n" "Trimmed Mean:" "$TRIM_MEAN" "$TRIM_REMAINING" "$TRIM_COUNT"
+
+# Run program with -t 10
+TMPFILE3=$(mktemp)
+echo "$DATA" | tr ' ' '\n' > "$TMPFILE3"
+
+if [[ -f "./stats" ]]; then
+    TRIM_OUTPUT=$(./stats -t 10 "$TMPFILE3")
+elif command -v go &> /dev/null; then
+    TRIM_OUTPUT=$(go run stats.go -t 10 "$TMPFILE3")
+else
+    echo "Error: Neither ./stats binary nor go command found"
+    rm "$TMPFILE3"
+    exit 1
+fi
+
+rm "$TMPFILE3"
+
+PROG_TRIM_MEAN=$(echo "$TRIM_OUTPUT" | grep "^Trimmed Mean" | awk '{print $NF}')
+
+echo ""
+printf "| %-12s | %15s | %15s | %-6s |\n" "Statistic" "bc Calculation" "Program Output" "Match"
+printf "|--------------|-----------------|-----------------|--------|\n"
+compare_values "Trim Mean" "$TRIM_MEAN" "$PROG_TRIM_MEAN"
 echo ""
 
 # --- Log Transform Verification ---
