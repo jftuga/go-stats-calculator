@@ -20,7 +20,7 @@ const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
 
-const PgmVersion string = "1.9.0"
+const PgmVersion string = "1.10.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
@@ -51,6 +51,8 @@ type Stats struct {
 	Trendline         string              // Unicode trendline showing sequence pattern
 	TrimmedMean       float64
 	TrimmedMeanPct    float64 // 0 = disabled
+	TrimDatasetPct    float64 // 0 = disabled; trim dataset before all stats
+	TrimDatasetOrigN  int     // original count before dataset trimming
 }
 
 func main() {
@@ -67,6 +69,7 @@ func main() {
 	zScoreThreshold := flag.Float64("z", 0, "Z-score threshold for outlier detection (e.g., 2.0, 2.5, 3.0; disabled by default)")
 	logTransform := flag.Bool("l", false, "apply natural log (ln) transform to input data")
 	trimPct := flag.Float64("t", 0, "trimmed mean percentage to remove from each tail (0-50)")
+	trimDatasetPct := flag.Float64("T", 0, "trim dataset: remove percentage from each tail before computing all statistics (0-50)")
 	flag.Parse()
 
 	if *numBins < 5 || *numBins > 50 {
@@ -81,6 +84,16 @@ func main() {
 
 	if *trimPct < 0 || *trimPct > 50 {
 		fmt.Fprintf(os.Stderr, "Error: trim percentage must be between 0 and 50, got %v\n", *trimPct)
+		os.Exit(1)
+	}
+
+	if *trimDatasetPct < 0 || *trimDatasetPct > 50 {
+		fmt.Fprintf(os.Stderr, "Error: trim dataset percentage must be between 0 and 50, got %v\n", *trimDatasetPct)
+		os.Exit(1)
+	}
+
+	if *trimPct > 0 && *trimDatasetPct > 0 {
+		fmt.Fprintf(os.Stderr, "Error: -t and -T are mutually exclusive; use -t for trimmed mean only, or -T to trim the entire dataset\n")
 		os.Exit(1)
 	}
 
@@ -126,6 +139,20 @@ func main() {
 		}
 	}
 
+	originalCount := len(numbers)
+	if *trimDatasetPct > 0 {
+		sorted := make([]float64, len(numbers))
+		copy(sorted, numbers)
+		sort.Float64s(sorted)
+		trimCount := int(math.Floor(float64(len(sorted)) * *trimDatasetPct / 100.0))
+		remaining := len(sorted) - 2*trimCount
+		if remaining < 1 {
+			fmt.Fprintf(os.Stderr, "Error: dataset too small (%d values) to trim %.4g%% from each end\n", len(sorted), *trimDatasetPct)
+			os.Exit(1)
+		}
+		numbers = sorted[trimCount : len(sorted)-trimCount]
+	}
+
 	var customPercentiles []float64
 	if *percentileFlag != "" {
 		for _, s := range strings.Split(*percentileFlag, ",") {
@@ -148,6 +175,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	if *trimDatasetPct > 0 {
+		stats.TrimDatasetPct = *trimDatasetPct
+		stats.TrimDatasetOrigN = originalCount
+		stats.Trendline = ""
+	}
+
 	labelWidth := 18 // len("Quartile 1 (p25):")
 	for _, p := range customPercentiles {
 		label := fmt.Sprintf("Percentile (p%s):", formatFloat(p))
@@ -167,9 +200,16 @@ func main() {
 			labelWidth = len(label)
 		}
 	}
+	if *trimDatasetPct > 0 {
+		labelWidth++ // account for * suffix on labels
+	}
 	labelWidth++ // ensure padding via fmt.Sprintf, not the label+space fallback in padLabel
 	if *logTransform {
 		fmt.Println("(log-transformed, base e)")
+		fmt.Println()
+	}
+	if *trimDatasetPct > 0 {
+		fmt.Printf("(trimmed dataset: %s%% from each tail, %d → %d values)\n", formatFloat(*trimDatasetPct), originalCount, stats.Count)
 		fmt.Println()
 	}
 	printStats(stats, labelWidth)
@@ -634,6 +674,10 @@ func printStats(s *Stats, labelWidth int) {
 	}
 	fmt.Printf("%s%s\n", padLabel("Quartile 1 (p25):", labelWidth), formatFloat(s.Q1))
 	fmt.Printf("%s%s\n", padLabel("Quartile 3 (p75):", labelWidth), formatFloat(s.Q3))
+	star := ""
+	if s.TrimDatasetPct > 0 {
+		star = "*"
+	}
 	allPercentiles := map[float64]float64{95: s.P95, 99: s.P99}
 	for k, v := range s.CustomPercentiles {
 		allPercentiles[k] = v
@@ -644,19 +688,19 @@ func printStats(s *Stats, labelWidth int) {
 	}
 	sort.Float64s(pctKeys)
 	for _, k := range pctKeys {
-		label := fmt.Sprintf("Percentile (p%s):", formatFloat(k))
+		label := fmt.Sprintf("Percentile (p%s)%s:", formatFloat(k), star)
 		fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloat(allPercentiles[k]))
 	}
 	fmt.Printf("%s%s\n", padLabel("IQR:", labelWidth), formatFloat(s.IQR))
-	fmt.Printf("%s%s (%s)\n", padLabel("Skewness:", labelWidth), formatFloat(s.Skewness), interpretSkewness(s.Skewness))
-	fmt.Printf("%s%s (%s)\n", padLabel("Kurtosis:", labelWidth), formatFloat(s.Kurtosis), interpretKurtosis(s.Kurtosis))
+	fmt.Printf("%s%s (%s)\n", padLabel("Skewness"+star+":", labelWidth), formatFloat(s.Skewness), interpretSkewness(s.Skewness))
+	fmt.Printf("%s%s (%s)\n", padLabel("Kurtosis"+star+":", labelWidth), formatFloat(s.Kurtosis), interpretKurtosis(s.Kurtosis))
 	if len(s.Outliers) > 0 {
-		fmt.Printf("%s%s\n", padLabel("Outliers:", labelWidth), formatFloatSlice(s.Outliers))
+		fmt.Printf("%s%s\n", padLabel("Outliers"+star+":", labelWidth), formatFloatSlice(s.Outliers))
 	} else {
-		fmt.Printf("%s%s\n", padLabel("Outliers:", labelWidth), "None")
+		fmt.Printf("%s%s\n", padLabel("Outliers"+star+":", labelWidth), "None")
 	}
 	if s.ZScoreThreshold > 0 {
-		label := fmt.Sprintf("Z-Outliers (Z>%s):", formatFloat(s.ZScoreThreshold))
+		label := fmt.Sprintf("Z-Outliers (Z>%s)%s:", formatFloat(s.ZScoreThreshold), star)
 		if len(s.ZScoreOutliers) > 0 {
 			fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloatSlice(s.ZScoreOutliers))
 		} else {
@@ -671,5 +715,8 @@ func printStats(s *Stats, labelWidth int) {
 		if s.Trendline != "" {
 			fmt.Printf("%s%s\n", padLabel("Trendline:", labelWidth), s.Trendline)
 		}
+	}
+	if s.TrimDatasetPct > 0 {
+		fmt.Println("\n* computed on trimmed dataset; tail-sensitive statistics may differ from full data")
 	}
 }

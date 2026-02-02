@@ -35,6 +35,7 @@ The calculator computes the following statistics:
 -   **Histogram**: A single-line Unicode histogram showing the distribution of values across configurable bins (`-b` flag).
 -   **Trendline**: A single-line Unicode trendline showing the sequence pattern of values in their original input order, using configurable bins (`-b` flag).
 -   **Trimmed Mean**: A robust measure of central tendency that removes a configurable percentage from each tail (`-t` flag). Less sensitive to outliers than the regular mean while using more data than the median.
+-   **Trim Dataset**: Sort and remove a percentage from each tail of the entire dataset before computing all statistics (`-T` flag). Unlike `-t` (which only adds a trimmed mean line), `-T` changes the entire output. Tail-sensitive statistics are marked with `*`.
 -   **Log Transform**: Optional natural log (ln) transform applied to all input data before computing statistics (`-l` flag). Useful for heavy-tailed data spanning several orders of magnitude (file sizes, latencies, income data). Requires all values to be positive.
 
 All numeric output uses full decimal notation (no scientific notation) with trailing zeros trimmed for readability.
@@ -253,7 +254,43 @@ For example, `-t 5` removes 5% from each end (10% total), and `-t 10` removes 10
 
 **Note on log transform interaction:** When used with `-l`, the trimmed mean is computed on the log-transformed values, consistent with how all other statistics behave.
 
-### 8. Log Transform
+### 9. Trim Dataset
+
+Use the `-T` flag to sort the input data, remove a percentage from each tail, and then compute **all** statistics on the reduced dataset. This differs from `-t` (trimmed mean), which only adds a single trimmed mean line while leaving all other statistics unchanged.
+
+When `-T` is active:
+- A header line shows the trim percentage and the before/after counts (e.g., `31 → 25 values`).
+- Tail-sensitive statistics (percentiles, skewness, kurtosis, outliers, Z-outliers) are marked with `*`.
+- The Trendline is suppressed (input order is lost after sorting).
+- A footnote explains the `*` markers.
+
+The `-t` and `-T` flags are mutually exclusive.
+
+**Syntax:**
+```bash
+./stats -T <percentage> <filename>
+```
+
+**Examples:**
+```bash
+# Remove 10% from each tail, compute all stats on reduced dataset
+./stats -T 10 data.txt
+
+# Remove 5% from each tail
+./stats -T 5 data.txt
+
+# Combined with other flags
+./stats -T 10 -z 2.0 -p "10,90" data.txt
+```
+
+**Comparison with `-t` (Trimmed Mean):**
+
+| Flag | What it does | Output effect |
+| :--- | :----------- | :------------ |
+| `-t 10` | Computes a trimmed mean and adds one line to the output | All other statistics use the full dataset |
+| `-T 10` | Removes 10% from each tail, then computes everything | All statistics use the reduced dataset; `*` markers on tail-sensitive stats |
+
+### 10. Log Transform
 
 Use the `-l` flag to apply a natural log (ln) transform to all input values before computing statistics. Every number in the input is replaced with its natural logarithm, and then all statistics (mean, median, standard deviation, outliers, etc.) are calculated on those transformed values.
 
@@ -394,6 +431,7 @@ The **Histogram** shows *distribution* — how values are spread across bins fro
 | **Z-Score Outliers** | Values whose Z-score (number of standard deviations from the mean) exceeds the threshold set with the `-z` flag. Only shown when `-z` is provided. Ideal for normally distributed data. |
 | **Histogram**     | A single-line Unicode histogram showing data distribution across bins. Each character represents a bin, with taller blocks indicating more values. Bin count is configurable with the `-b` flag (default 16). |
 | **Trendline**     | A single-line Unicode trendline showing the sequence pattern of values in their original input order. Data is divided into equal chunks, each averaged and mapped to a block character. Bin count is configurable with the `-b` flag (default 16). |
+| **Trim Dataset** | When the `-T` flag is used, a `(trimmed dataset: ...)` header appears above the output showing the trim percentage and before/after counts. All statistics are computed on the reduced dataset. Tail-sensitive statistics (percentiles, skewness, kurtosis, outliers) are marked with `*`. The Trendline is suppressed. Mutually exclusive with `-t`. |
 | **Log Transform** | When the `-l` flag is used, a `(log-transformed, base e)` header appears above the output. All statistics are computed on `ln(x)` values. To convert back to original units, exponentiate (e.g., `e^mean`). Requires all input values to be positive. |
 
 ## Testing and Correctness

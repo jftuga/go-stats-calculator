@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"os/exec"
 	"sort"
 	"strings"
 	"testing"
@@ -680,5 +681,58 @@ func TestTrimmedMeanSmallTrim(t *testing.T) {
 	}
 	if !floatEquals(stats.TrimmedMean, stats.Mean) {
 		t.Errorf("TrimmedMean: got %v, expected %v (same as Mean)", stats.TrimmedMean, stats.Mean)
+	}
+}
+
+func TestTrimDataset(t *testing.T) {
+	// Manually trim testData at 10%: sort, remove 3 from each end (floor(31*10/100)=3)
+	sorted := make([]float64, len(testData))
+	copy(sorted, testData)
+	sort.Float64s(sorted)
+	trimmed := sorted[3 : len(sorted)-3] // 25 values
+
+	stats, err := computeStats(trimmed, nil, 1.5, 16, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if stats.Count != 25 {
+		t.Errorf("Count: got %d, expected 25", stats.Count)
+	}
+
+	// Mean of trimmed data should differ from full data mean
+	fullStats, err := computeStats(testData, nil, 1.5, 16, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if floatEquals(stats.Mean, fullStats.Mean) {
+		t.Errorf("Trimmed dataset mean (%v) should differ from full dataset mean (%v)", stats.Mean, fullStats.Mean)
+	}
+
+	// Verify the expected trimmed mean
+	if !floatEquals(stats.Mean, 49.71) {
+		t.Errorf("Trimmed dataset Mean: got %v, expected 49.71", stats.Mean)
+	}
+}
+
+func TestTrimDatasetTooSmall(t *testing.T) {
+	// 3 values with trim=50%: trimCount = floor(3*50/100) = 1, remaining = 1 → should work
+	// 2 values with trim=50%: trimCount = floor(2*50/100) = 1, remaining = 0 → error
+	sorted := []float64{1, 2}
+	sort.Float64s(sorted)
+	trimCount := int(math.Floor(float64(len(sorted)) * 50 / 100.0))
+	remaining := len(sorted) - 2*trimCount
+	if remaining >= 1 {
+		t.Errorf("Expected remaining < 1 for 2 values at 50%% trim, got %d", remaining)
+	}
+}
+
+func TestTrimDatasetMutualExclusion(t *testing.T) {
+	cmd := exec.Command("go", "run", "stats.go", "-t", "10", "-T", "10", "test_data.txt")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("Expected error when using both -t and -T, but got none")
+	}
+	if !strings.Contains(string(output), "mutually exclusive") {
+		t.Errorf("Expected mutual exclusion error message, got: %s", string(output))
 	}
 }
