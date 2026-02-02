@@ -390,6 +390,75 @@ compare_values "Log StdDev" "$LOG_STDDEV" "$PROG_LOG_STDDEV"
 compare_values "Log Variance" "$LOG_VARIANCE" "$PROG_LOG_VARIANCE"
 echo ""
 
+# --- Trim Dataset (-T) Verification ---
+echo "=============================================="
+echo "Trim Dataset Verification (-T 10)"
+echo "=============================================="
+echo ""
+
+TMPFILE4=$(mktemp)
+echo "$DATA" | tr ' ' '\n' > "$TMPFILE4"
+
+if [[ -f "./stats" ]]; then
+    TRIMD_OUTPUT=$(./stats -T 10 "$TMPFILE4")
+elif command -v go &> /dev/null; then
+    TRIMD_OUTPUT=$(go run stats.go -T 10 "$TMPFILE4")
+else
+    echo "Error: Neither ./stats binary nor go command found"
+    rm "$TMPFILE4"
+    exit 1
+fi
+
+rm "$TMPFILE4"
+
+echo "$TRIMD_OUTPUT"
+echo ""
+
+# Verify header line present with correct counts
+TRIMD_HEADER=$(echo "$TRIMD_OUTPUT" | grep "^(trimmed dataset:")
+if [[ -z "$TRIMD_HEADER" ]]; then
+    echo "FAIL: Trim dataset header not found"
+    FAILURES=$((FAILURES + 1))
+else
+    echo "PASS: Trim dataset header present: $TRIMD_HEADER"
+    # Verify counts in header (31 → 25)
+    if echo "$TRIMD_HEADER" | grep -q "31 → 25"; then
+        echo "PASS: Header shows correct counts (31 → 25)"
+    else
+        echo "FAIL: Header does not show expected counts (31 → 25)"
+        FAILURES=$((FAILURES + 1))
+    fi
+fi
+
+# Verify Count shows 25
+TRIMD_COUNT=$(echo "$TRIMD_OUTPUT" | grep "^Count:" | awk '{print $2}')
+if [[ "$TRIMD_COUNT" == "25" ]]; then
+    echo "PASS: Count is 25 (trimmed from 31)"
+else
+    echo "FAIL: Count is $TRIMD_COUNT, expected 25"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Verify Trendline absent
+TRIMD_TRENDLINE=$(echo "$TRIMD_OUTPUT" | grep "^Trendline:" || true)
+if [[ -z "$TRIMD_TRENDLINE" ]]; then
+    echo "PASS: Trendline absent (as expected for trimmed dataset)"
+else
+    echo "FAIL: Trendline should be absent for trimmed dataset"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Verify footnote present
+TRIMD_FOOTNOTE=$(echo "$TRIMD_OUTPUT" | grep "computed on trimmed dataset")
+if [[ -n "$TRIMD_FOOTNOTE" ]]; then
+    echo "PASS: Footnote present"
+else
+    echo "FAIL: Footnote not found"
+    FAILURES=$((FAILURES + 1))
+fi
+
+echo ""
+
 if [[ $FAILURES -eq 0 ]]; then
     echo "Verification complete. All values match."
     exit 0
