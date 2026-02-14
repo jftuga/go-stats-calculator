@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Understanding Skewness</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; display: flex; flex-direction: column; align-items: center; padding: 30px 20px; min-height: 100vh; }
+  h1 { font-size: 28px; margin-bottom: 8px; color: #fff; }
+  .subtitle { color: #aaa; margin-bottom: 30px; font-size: 15px; }
+  .container { display: flex; gap: 40px; flex-wrap: wrap; justify-content: center; margin-bottom: 30px; }
+  .panel { background: #16213e; border-radius: 12px; padding: 24px; width: 420px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+  .panel h2 { text-align: center; margin-bottom: 4px; font-size: 20px; }
+  .panel .skew-value { text-align: center; font-size: 14px; color: #aaa; margin-bottom: 16px; }
+  canvas { display: block; margin: 0 auto; }
+  .legend { display: flex; justify-content: center; gap: 24px; margin-top: 14px; font-size: 13px; color: #ccc; }
+  .legend span { display: flex; align-items: center; gap: 6px; }
+  .legend .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .note { background: #16213e; border-radius: 12px; padding: 20px 28px; max-width: 880px; line-height: 1.7; font-size: 15px; color: #ccc; margin-top: 10px; }
+  .note strong { color: #fff; }
+  .key-point { color: #f7c948; font-weight: 600; }
+  .examples { margin-top: 12px; padding-top: 12px; border-top: 1px solid #2a3a5e; }
+  .examples ul { margin-left: 20px; margin-top: 6px; }
+  .examples li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Understanding Skewness Direction</h1>
+<p class="subtitle">The skew is named for where the <strong>tail</strong> points, not where the peak is.</p>
+
+<div class="container">
+  <div class="panel">
+    <h2 style="color:#5b9ef5;">Left Skewed (Negative)</h2>
+    <p class="skew-value">Skewness &lt; 0 &mdash; tail extends left</p>
+    <canvas id="leftSkew" width="380" height="220"></canvas>
+    <div class="legend">
+      <span><span class="dot" style="background:#f25c54;"></span> Mean</span>
+      <span><span class="dot" style="background:#f7c948;"></span> Median</span>
+      <span>Mean &lt; Median</span>
+    </div>
+  </div>
+  <div class="panel">
+    <h2 style="color:#5b9ef5;">Symmetrical</h2>
+    <p class="skew-value">Skewness &asymp; 0 &mdash; no tail bias</p>
+    <canvas id="symmetric" width="380" height="220"></canvas>
+    <div class="legend">
+      <span><span class="dot" style="background:#f25c54;"></span> Mean</span>
+      <span><span class="dot" style="background:#f7c948;"></span> Median</span>
+      <span>Mean &asymp; Median</span>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="panel">
+    <h2 style="color:#5b9ef5;">Right Skewed (Positive)</h2>
+    <p class="skew-value">Skewness &gt; 0 &mdash; tail extends right</p>
+    <canvas id="rightSkew" width="380" height="220"></canvas>
+    <div class="legend">
+      <span><span class="dot" style="background:#f25c54;"></span> Mean</span>
+      <span><span class="dot" style="background:#f7c948;"></span> Median</span>
+      <span>Mean &gt; Median</span>
+    </div>
+  </div>
+  <div class="panel">
+    <h2 style="color:#5b9ef5;">Skewness Thresholds</h2>
+    <p class="skew-value">How go-stats-calculator classifies skewness</p>
+    <canvas id="thresholds" width="380" height="220"></canvas>
+    <div class="legend">
+      <span>|s| &lt; 0.5 = Symmetrical</span>
+      <span>|s| &lt; 1.0 = Moderate</span>
+      <span>|s| &ge; 1.0 = High</span>
+    </div>
+  </div>
+</div>
+
+<div class="note">
+  <strong>Key takeaway:</strong> The name refers to the direction of the <span class="key-point">long tail</span>, not the peak.<br>
+  <strong>Right skewed (positive)</strong> = peak on the left, tail stretches right, mean is pulled right of the median.<br>
+  <strong>Left skewed (negative)</strong> = peak on the right, tail stretches left, mean is pulled left of the median.<br>
+  <strong>Symmetrical</strong> = balanced tails on both sides, mean and median are approximately equal.
+  <div class="examples">
+    <strong>Real-world examples:</strong>
+    <ul>
+      <li><strong>Right skewed:</strong> income distribution, home prices, response times &mdash; most values cluster low with a few extreme highs</li>
+      <li><strong>Left skewed:</strong> exam scores (easy test), age at retirement &mdash; most values cluster high with a few extreme lows</li>
+      <li><strong>Symmetrical:</strong> human heights, measurement errors &mdash; values cluster around the center equally</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+function drawDistribution(canvasId, frequencies, meanPos, medianPos, barColor) {
+  const canvas = document.getElementById(canvasId);
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const pad = { top: 10, bottom: 25, left: 10, right: 10 };
+  const plotW = W - pad.left - pad.right;
+  const plotH = H - pad.top - pad.bottom;
+
+  const maxFreq = Math.max(...frequencies);
+  const n = frequencies.length;
+  const barW = plotW / n;
+
+  // Draw bars
+  for (let i = 0; i < n; i++) {
+    const h = (frequencies[i] / maxFreq) * plotH;
+    const x = pad.left + i * barW;
+    const y = pad.top + plotH - h;
+    ctx.fillStyle = barColor || '#5b9ef5';
+    ctx.fillRect(x + 1, y, barW - 2, h);
+  }
+
+  // Baseline
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.left, pad.top + plotH);
+  ctx.lineTo(pad.left + plotW, pad.top + plotH);
+  ctx.stroke();
+
+  // Arrow labels
+  const arrowY = pad.top + plotH + 18;
+  ctx.fillStyle = '#888';
+  ctx.font = '12px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('Low', pad.left, arrowY);
+  ctx.textAlign = 'right';
+  ctx.fillText('High', pad.left + plotW, arrowY);
+
+  // Vertical marker helper
+  function drawMarker(pos, color, label, offsetX) {
+    const x = pad.left + pos * plotW;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(x, pad.top);
+    ctx.lineTo(x, pad.top + plotH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = color;
+    ctx.font = 'bold 13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, x + (offsetX || 0), pad.top + 14);
+  }
+
+  drawMarker(medianPos, '#f7c948', 'Median', -2);
+  drawMarker(meanPos, '#f25c54', 'Mean', 2);
+}
+
+function drawThresholdDiagram() {
+  const canvas = document.getElementById('thresholds');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const pad = { top: 30, bottom: 40, left: 40, right: 40 };
+  const plotW = W - pad.left - pad.right;
+  const centerX = pad.left + plotW / 2;
+  const lineY = pad.top + 60;
+
+  // Number line
+  ctx.strokeStyle = '#888';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(pad.left, lineY);
+  ctx.lineTo(pad.left + plotW, lineY);
+  ctx.stroke();
+
+  // Tick marks and labels
+  const ticks = [
+    { val: -2, label: '-2.0' },
+    { val: -1, label: '-1.0' },
+    { val: -0.5, label: '-0.5' },
+    { val: 0, label: '0' },
+    { val: 0.5, label: '0.5' },
+    { val: 1, label: '1.0' },
+    { val: 2, label: '2.0' }
+  ];
+
+  ctx.fillStyle = '#ccc';
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'center';
+
+  for (const t of ticks) {
+    const x = centerX + (t.val / 2.5) * (plotW / 2);
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, lineY - 6);
+    ctx.lineTo(x, lineY + 6);
+    ctx.stroke();
+    ctx.fillStyle = '#aaa';
+    ctx.fillText(t.label, x, lineY + 20);
+  }
+
+  // Zone coloring
+  const zones = [
+    { from: -2.5, to: -1, color: 'rgba(242, 92, 84, 0.25)', label: 'Highly Left', labelY: lineY - 20 },
+    { from: -1, to: -0.5, color: 'rgba(247, 201, 72, 0.25)', label: 'Moderately Left', labelY: lineY - 20 },
+    { from: -0.5, to: 0.5, color: 'rgba(78, 205, 196, 0.25)', label: 'Fairly Symmetrical', labelY: lineY - 20 },
+    { from: 0.5, to: 1, color: 'rgba(247, 201, 72, 0.25)', label: 'Moderately Right', labelY: lineY - 20 },
+    { from: 1, to: 2.5, color: 'rgba(242, 92, 84, 0.25)', label: 'Highly Right', labelY: lineY - 20 }
+  ];
+
+  for (const z of zones) {
+    const x1 = centerX + (z.from / 2.5) * (plotW / 2);
+    const x2 = centerX + (z.to / 2.5) * (plotW / 2);
+    ctx.fillStyle = z.color;
+    ctx.fillRect(x1, lineY - 30, x2 - x1, 60);
+  }
+
+  // Zone labels
+  ctx.font = 'bold 11px sans-serif';
+  const labelData = [
+    { text: 'Highly', text2: 'Left', x: -1.75, color: '#f25c54' },
+    { text: 'Mod.', text2: 'Left', x: -0.75, color: '#f7c948' },
+    { text: 'Fairly', text2: 'Symmetrical', x: 0, color: '#4ecdc4' },
+    { text: 'Mod.', text2: 'Right', x: 0.75, color: '#f7c948' },
+    { text: 'Highly', text2: 'Right', x: 1.75, color: '#f25c54' }
+  ];
+
+  for (const l of labelData) {
+    const x = centerX + (l.x / 2.5) * (plotW / 2);
+    ctx.fillStyle = l.color;
+    ctx.textAlign = 'center';
+    ctx.fillText(l.text, x, lineY + 38);
+    ctx.fillText(l.text2, x, lineY + 52);
+  }
+}
+
+// Left skewed: bulk on right, tail to left
+const leftSkewData = [1, 2, 3, 4, 6, 8, 11, 15, 21, 28, 36, 44, 50, 52, 48, 38];
+drawDistribution('leftSkew', leftSkewData, 0.38, 0.52, '#5b9ef5');
+
+// Symmetrical: bell curve shape
+const symmetricData = [2, 5, 10, 18, 30, 42, 50, 52, 52, 50, 42, 30, 18, 10, 5, 2];
+drawDistribution('symmetric', symmetricData, 0.5, 0.5, '#4ecdc4');
+
+// Right skewed: bulk on left, tail to right
+const rightSkewData = [38, 48, 52, 50, 44, 36, 28, 21, 15, 11, 8, 6, 4, 3, 2, 1];
+drawDistribution('rightSkew', rightSkewData, 0.62, 0.48, '#5b9ef5');
+
+// Threshold diagram
+drawThresholdDiagram();
+</script>
+
+</body>
+</html>
