@@ -20,7 +20,7 @@ const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
 
-const PgmVersion string = "1.10.0"
+const PgmVersion string = "1.11.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
@@ -53,6 +53,8 @@ type Stats struct {
 	TrimmedMeanPct    float64 // 0 = disabled
 	TrimDatasetPct    float64 // 0 = disabled; trim dataset before all stats
 	TrimDatasetOrigN  int     // original count before dataset trimming
+	EMA               float64
+	EMASpan           int // 0 = disabled
 }
 
 func main() {
@@ -70,6 +72,7 @@ func main() {
 	logTransform := flag.Bool("l", false, "apply natural log (ln) transform to input data")
 	trimPct := flag.Float64("t", 0, "trimmed mean percentage to remove from each tail (0-50)")
 	trimDatasetPct := flag.Float64("T", 0, "trim dataset: remove percentage from each tail before computing all statistics (0-50)")
+	emaSpan := flag.Int("e", 0, "EMA span (number of periods) for exponential moving average (>= 2)")
 	flag.Parse()
 
 	if *numBins < 5 || *numBins > 50 {
@@ -89,6 +92,11 @@ func main() {
 
 	if *trimDatasetPct < 0 || *trimDatasetPct > 50 {
 		fmt.Fprintf(os.Stderr, "Error: trim dataset percentage must be between 0 and 50, got %v\n", *trimDatasetPct)
+		os.Exit(1)
+	}
+
+	if *emaSpan != 0 && *emaSpan < 2 {
+		fmt.Fprintf(os.Stderr, "Error: EMA span must be >= 2, got %d\n", *emaSpan)
 		os.Exit(1)
 	}
 
@@ -169,7 +177,7 @@ func main() {
 		}
 	}
 
-	stats, err := computeStats(numbers, customPercentiles, *iqrMultiplier, *numBins, *zScoreThreshold, *trimPct)
+	stats, err := computeStats(numbers, customPercentiles, *iqrMultiplier, *numBins, *zScoreThreshold, *trimPct, *emaSpan)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error computing stats: %v\n", err)
 		os.Exit(1)
@@ -196,6 +204,12 @@ func main() {
 	}
 	if *trimPct > 0 {
 		label := fmt.Sprintf("Trimmed Mean (%s%%):", formatFloat(*trimPct))
+		if len(label) > labelWidth {
+			labelWidth = len(label)
+		}
+	}
+	if *emaSpan > 0 {
+		label := fmt.Sprintf("EMA (span %d):", *emaSpan)
 		if len(label) > labelWidth {
 			labelWidth = len(label)
 		}
@@ -256,7 +270,7 @@ func applyLogTransform(numbers []float64) ([]float64, error) {
 }
 
 // computeStats calculates all the desired statistics for a slice of numbers.
-func computeStats(data []float64, customPercentiles []float64, iqrMultiplier float64, numBins int, zScoreThreshold float64, trimPct float64) (*Stats, error) {
+func computeStats(data []float64, customPercentiles []float64, iqrMultiplier float64, numBins int, zScoreThreshold float64, trimPct float64, emaSpan int) (*Stats, error) {
 	count := len(data)
 	if count == 0 {
 		return nil, fmt.Errorf("input contains no valid numbers")
@@ -395,6 +409,12 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 	} else {
 		stats.CVValid = true
 		stats.CV = (stats.StdDev / math.Abs(stats.Mean)) * 100
+	}
+
+	// --- EMA ---
+	if emaSpan >= 2 {
+		stats.EMA = calculateEMA(data, emaSpan)
+		stats.EMASpan = emaSpan
 	}
 
 	// --- Histogram ---
@@ -562,6 +582,17 @@ func calculateKurtosis(data []float64, mean, stdDev float64) float64 {
 	return (n*(n+1))/((n-1)*(n-2)*(n-3))*sumOfFourthDeviations - 3*(n-1)*(n-1)/((n-2)*(n-3))
 }
 
+// calculateEMA computes the final exponential moving average value for the given span.
+// EMA uses the multiplier α = 2/(span+1), starting from the first data point.
+func calculateEMA(data []float64, span int) float64 {
+	alpha := 2.0 / (float64(span) + 1.0)
+	ema := data[0]
+	for i := 1; i < len(data); i++ {
+		ema = alpha*data[i] + (1-alpha)*ema
+	}
+	return ema
+}
+
 // interpretKurtosis provides a human-readable label for a kurtosis value.
 func interpretKurtosis(k float64) string {
 	if k < -1 {
@@ -646,6 +677,10 @@ func printStats(s *Stats, labelWidth int) {
 	if s.TrimmedMeanPct > 0 {
 		label := fmt.Sprintf("Trimmed Mean (%s%%):", formatFloat(s.TrimmedMeanPct))
 		fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloat(s.TrimmedMean))
+	}
+	if s.EMASpan > 0 {
+		label := fmt.Sprintf("EMA (span %d):", s.EMASpan)
+		fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloat(s.EMA))
 	}
 	fmt.Printf("%s%s\n", padLabel("Median (p50):", labelWidth), formatFloat(s.Median))
 
