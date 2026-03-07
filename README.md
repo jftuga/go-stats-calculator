@@ -35,6 +35,7 @@ The calculator computes the following statistics:
 -   **Histogram**: A single-line Unicode histogram showing the distribution of values across configurable bins (`-b` flag).
 -   **Trendline**: A single-line Unicode trendline showing the sequence pattern of values in their original input order, using configurable bins (`-b` flag).
 -   **Trimmed Mean**: A robust measure of central tendency that removes a configurable percentage from each tail (`-t` flag). Less sensitive to outliers than the regular mean while using more data than the median.
+-   **EMA (Exponential Moving Average)**: A weighted moving average that gives more weight to recent values (`-e` flag). Unlike the simple mean, EMA is order-dependent and more responsive to new data, making it useful for detecting recent trends in time-series data.
 -   **Trim Dataset**: Sort and remove a percentage from each tail of the entire dataset before computing all statistics (`-T` flag). Unlike `-t` (which only adds a trimmed mean line), `-T` changes the entire output. Tail-sensitive statistics are marked with `*`.
 -   **Log Transform**: Optional natural log (ln) transform applied to all input data before computing statistics (`-l` flag). Useful for heavy-tailed data spanning several orders of magnitude (file sizes, latencies, income data). Requires all values to be positive.
 
@@ -254,6 +255,37 @@ For example, `-t 5` removes 5% from each end (10% total), and `-t 10` removes 10
 
 **Note on log transform interaction:** When used with `-l`, the trimmed mean is computed on the log-transformed values, consistent with how all other statistics behave.
 
+### 8. Exponential Moving Average (EMA)
+
+Use the `-e` flag to compute an exponential moving average. EMA is a weighted average that gives exponentially more weight to recent values, making it more responsive to new data than the simple mean. The span parameter controls the "window" size — a smaller span reacts faster to changes, while a larger span produces a smoother result.
+
+The smoothing factor is calculated as `α = 2 / (span + 1)`. The EMA is computed in input order, so unlike most other statistics in this tool, **input order matters**.
+
+**Syntax:**
+```bash
+./stats -e <span> <filename>
+```
+
+**Examples:**
+```bash
+# EMA with a span of 5
+./stats -e 5 data.txt
+
+# EMA with a longer span for smoother results
+./stats -e 20 data.txt
+
+# Combined with other flags
+./stats -e 10 -z 2.0 -p "10,90" data.txt
+```
+
+**Common span values:**
+
+| Span | Description |
+| :--- | :---------- |
+| **5** | Fast-reacting. Heavily influenced by the most recent values. |
+| **10** | Moderate smoothing. A common default for short time series. |
+| **20** | Smooth. Slower to react, better for identifying longer-term trends. |
+
 ### 9. Trim Dataset
 
 Use the `-T` flag to sort the input data, remove a percentage from each tail, and then compute **all** statistics on the reduced dataset. This differs from `-t` (trimmed mean), which only adds a single trimmed mean line while leaving all other statistics unchanged.
@@ -414,6 +446,7 @@ The **Histogram** shows *distribution* — how values are spread across bins fro
 | **Max**           | The largest number in the dataset.                                                                                                                                         |
 | **Mean**          | The "average" value. Highly sensitive to outliers.                                                                                                                         |
 | **Trimmed Mean**  | The mean after removing a percentage of values from each tail of the sorted dataset. Only shown when `-t` is used. More robust than the mean against outliers while using more of the data than the median. |
+| **EMA** | The exponential moving average for the given span. Only shown when `-e` is used. Unlike the simple mean, EMA is order-dependent and weights recent values more heavily. |
 | **Median (p50)**  | The middle value of the sorted dataset. Represents the "typical" value and is robust against outliers.                                                                     |
 | **Mode**          | The number(s) that occur most frequently. If no number repeats, the mode is "None".                                                                                        |
 | **Std Deviation** | Measures how spread out the numbers are from the mean. A low value indicates data is clustered tightly; a high value indicates data is spread out.                         |
