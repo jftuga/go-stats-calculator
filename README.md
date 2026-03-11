@@ -56,6 +56,25 @@ All numeric output uses full decimal notation (no scientific notation) with trai
     go build -ldflags="-s -w" -o stats stats.go
     ```
 
+## Claude Code Skill
+
+This project includes a [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill that lets Claude invoke `stats` directly when you ask it to analyze numeric data, detect outliers, or compute statistics. The skill file is located at `.claude/skills/numstats/SKILL.md` in this repository. Invoke it with `/numstats` in Claude Code.
+
+### Automatic (project-level)
+
+If you clone this repository and use Claude Code from within the project directory, the skill is picked up automatically — no extra steps needed.
+
+### Manual Install (global)
+
+To make the skill available in **any** directory, copy it into your global Claude Code skills folder:
+
+```bash
+mkdir -p ~/.claude/skills/numstats
+cp .claude/skills/numstats/SKILL.md ~/.claude/skills/numstats/SKILL.md
+```
+
+Once installed, Claude Code will use the `stats` binary (which must be on your `PATH`) whenever you ask it to perform statistical analysis on numeric data.
+
 ## Usage
 
 The program can be run in two ways: by providing a filename as a command-line argument or by piping data into it. The program automatically detects piped input, so the `-` argument is optional.
