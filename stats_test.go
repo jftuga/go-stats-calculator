@@ -2,8 +2,11 @@ package main
 
 import (
 	"math"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -34,6 +37,17 @@ var testData = []float64{
 	5, 10, 15.5, 20, 25.00, 30, 35.0, 40, 45, 50,
 	55, 60, 65, 70, 75.25, 80, 85, 90, 95, 100,
 	12.5, 37.5, 62.50, 87.5, 50, 50, 50, 3, 150, 7.75, 42.0,
+}
+
+// Symmetric test dataset with 40 numbers:
+// - 20 disjoint pairs, each summing to 1000 (symmetric about 500)
+// - All values distinct; 500 itself is deliberately absent
+// - Order is scrambled so the property is not visible positionally
+var symmetricTestData = []float64{
+	612, 137, 827, 495, 958, 264, 709, 19, 882, 455,
+	349, 736, 88, 981, 545, 233, 61, 694, 42, 767,
+	388, 118, 912, 651, 306, 994, 173, 588, 505, 377,
+	863, 220, 939, 6, 623, 780, 151, 849, 291, 412,
 }
 
 func TestComputeStats(t *testing.T) {
@@ -801,5 +815,219 @@ func TestEMADisabled(t *testing.T) {
 	}
 	if stats.EMA != 0 {
 		t.Errorf("EMA: got %v, expected 0", stats.EMA)
+	}
+}
+
+func TestDetectSymmetry(t *testing.T) {
+	// Near-miss copy of the symmetric fixture: one value changed by 1 breaks the 612+388 pair
+	nearMiss := make([]float64, len(symmetricTestData))
+	copy(nearMiss, symmetricTestData)
+	nearMiss[0] = 613
+
+	tests := []struct {
+		name      string
+		data      []float64
+		symmetric bool
+		center    float64
+		pairs     int
+	}{
+		{"Even symmetric", symmetricTestData, true, 500, 20},
+		{"Odd symmetric", []float64{2, 4, 6, 8, 10, 12, 14}, true, 8, 3},
+		{"Consecutive integers", []float64{1, 2, 3, 4, 5, 6, 7, 8, 9}, true, 5, 4},
+		{"Asymmetric", testData, false, 0, 0},
+		{"Mean equals median but asymmetric", []float64{1, 2, 6, 9, 12}, false, 0, 0},
+		{"All identical", []float64{5, 5, 5}, true, 5, 1},
+		{"With duplicates", []float64{1, 2, 2, 3, 4, 4, 5}, true, 3, 3},
+		{"Negative and mixed sign", []float64{-10, -5, 0, 5, 10}, true, 0, 2},
+		{"Floats", []float64{1.5, 2.5, 3.5}, true, 2.5, 1},
+		{"Near miss", nearMiss, false, 0, 0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// detectSymmetry requires sorted input; sort a copy so fixtures are untouched
+			sorted := make([]float64, len(tc.data))
+			copy(sorted, tc.data)
+			sort.Float64s(sorted)
+			symmetric, center, pairs := detectSymmetry(sorted)
+			if symmetric != tc.symmetric {
+				t.Errorf("symmetric: got %v, expected %v", symmetric, tc.symmetric)
+			}
+			// center and pairs are undefined when symmetric is false
+			if tc.symmetric {
+				if !floatEquals(center, tc.center) {
+					t.Errorf("center: got %v, expected %v", center, tc.center)
+				}
+				if pairs != tc.pairs {
+					t.Errorf("pairs: got %v, expected %v", pairs, tc.pairs)
+				}
+			}
+		})
+	}
+}
+
+func TestDetectSymmetryEdgeCases(t *testing.T) {
+	// Fewer than 3 values: symmetry is not evaluated, signaled by symmetric == false
+	t.Run("Empty", func(t *testing.T) {
+		symmetric, _, _ := detectSymmetry([]float64{})
+		if symmetric {
+			t.Error("expected not symmetric for empty input")
+		}
+	})
+
+	t.Run("OneElement", func(t *testing.T) {
+		symmetric, _, _ := detectSymmetry([]float64{42})
+		if symmetric {
+			t.Error("expected not symmetric for one element")
+		}
+	})
+
+	t.Run("TwoElements", func(t *testing.T) {
+		symmetric, _, _ := detectSymmetry([]float64{5, 7})
+		if symmetric {
+			t.Error("expected not symmetric for two elements")
+		}
+	})
+}
+
+func TestDetectSymmetryFloatTolerance(t *testing.T) {
+	// Repeated addition of 0.1 accumulates representation error, but pair sums
+	// stay well within the scale-relative tolerance
+	t.Run("AccumulatedFloatError", func(t *testing.T) {
+		data := make([]float64, 9)
+		v := 0.0
+		for i := range data {
+			v += 0.1
+			data[i] = v
+		}
+		symmetric, center, _ := detectSymmetry(data)
+		if !symmetric {
+			t.Error("expected symmetric despite accumulated float error")
+		}
+		if !floatEquals(center, 0.5) {
+			t.Errorf("center: got %v, expected 0.5", center)
+		}
+	})
+
+	// A shift of 1e-5 is below the test epsilon of 1e-4 but far above the
+	// detection tolerance, so it must be reported as not symmetric
+	t.Run("GenuineSmallDifference", func(t *testing.T) {
+		data := []float64{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9 + 1e-5}
+		symmetric, _, _ := detectSymmetry(data)
+		if symmetric {
+			t.Error("expected not symmetric for value shifted by 1e-5")
+		}
+	})
+}
+
+func TestSymmetryViaComputeStats(t *testing.T) {
+	stats, err := computeStats(symmetricTestData, nil, 1.5, 16, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+
+	// These four are consequences of symmetry, equally true of many asymmetric datasets
+	if !floatEquals(stats.Sum, 20000) {
+		t.Errorf("Sum: got %v, expected 20000", stats.Sum)
+	}
+	if !floatEquals(stats.Mean, 500) {
+		t.Errorf("Mean: got %v, expected 500", stats.Mean)
+	}
+	if !floatEquals(stats.Median, 500) {
+		t.Errorf("Median: got %v, expected 500", stats.Median)
+	}
+	if !floatEquals(stats.Skewness, 0) {
+		t.Errorf("Skewness: got %v, expected 0", stats.Skewness)
+	}
+
+	// The pairwise check identifies the actual property
+	if !stats.IsSymmetric {
+		t.Error("IsSymmetric: got false, expected true")
+	}
+	if !floatEquals(stats.SymmetryCenter, 500) {
+		t.Errorf("SymmetryCenter: got %v, expected 500", stats.SymmetryCenter)
+	}
+	if stats.SymmetryPairs != 20 {
+		t.Errorf("SymmetryPairs: got %d, expected 20", stats.SymmetryPairs)
+	}
+}
+
+func TestSymmetryNotDetectedForTestData(t *testing.T) {
+	stats, err := computeStats(testData, nil, 1.5, 16, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if stats.IsSymmetric {
+		t.Error("IsSymmetric: got true, expected false for asymmetric testData")
+	}
+}
+
+func TestSymmetryIndependentOfInputOrder(t *testing.T) {
+	// Deterministic permutation: stride through the fixture with step 7, coprime with 40
+	n := len(symmetricTestData)
+	shuffled := make([]float64, n)
+	for i := 0; i < n; i++ {
+		shuffled[i] = symmetricTestData[(i*7)%n]
+	}
+
+	original, err := computeStats(symmetricTestData, nil, 1.5, 16, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	reordered, err := computeStats(shuffled, nil, 1.5, 16, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+
+	if !original.IsSymmetric {
+		t.Error("IsSymmetric (original order): got false, expected true")
+	}
+	if reordered.IsSymmetric != original.IsSymmetric {
+		t.Errorf("IsSymmetric: got %v for shuffled, expected %v", reordered.IsSymmetric, original.IsSymmetric)
+	}
+	if !floatEquals(reordered.SymmetryCenter, original.SymmetryCenter) {
+		t.Errorf("SymmetryCenter: got %v for shuffled, expected %v", reordered.SymmetryCenter, original.SymmetryCenter)
+	}
+	if reordered.SymmetryPairs != original.SymmetryPairs {
+		t.Errorf("SymmetryPairs: got %d for shuffled, expected %d", reordered.SymmetryPairs, original.SymmetryPairs)
+	}
+}
+
+func TestSymmetryOutputLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "symmetric.txt")
+	var sb strings.Builder
+	for _, v := range symmetricTestData {
+		sb.WriteString(strconv.FormatFloat(v, 'f', -1, 64))
+		sb.WriteString("\n")
+	}
+	if err := os.WriteFile(path, []byte(sb.String()), 0o644); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+
+	cmd := exec.Command("go", "run", "stats.go", path)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go run failed: %v\n%s", err, string(output))
+	}
+	if !strings.Contains(string(output), "Symmetric about 500 (20 pairs)") {
+		t.Errorf("expected symmetric output line, got:\n%s", string(output))
+	}
+
+	cmd = exec.Command("go", "run", "stats.go", "test_data.txt")
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go run failed: %v\n%s", err, string(output))
+	}
+	found := false
+	for _, line := range strings.Split(string(output), "\n") {
+		if strings.HasPrefix(line, "Symmetry:") {
+			found = true
+			if !strings.Contains(line, "None") {
+				t.Errorf("expected Symmetry line to read None, got: %s", line)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("Symmetry line not found in output:\n%s", string(output))
 	}
 }
