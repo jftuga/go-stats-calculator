@@ -35,18 +35,22 @@ printf '%s\n' 10 20 30 40 50 | stats
 | `-T` | float | 0 | Trim dataset percentage from each tail before all stats (0-50) |
 | `-e` | int | 0 | EMA span for exponential moving average (>= 2 to enable) |
 
-**Note:** `-t` and `-T` are mutually exclusive.
+**Note:** `-T` is mutually exclusive with both `-t` and `-e`.
 
 ### Computed statistics
 
 - **Count, Sum, Min, Max**
-- **Mean, Median, Mode**
-- **Std Deviation, Variance, Coefficient of Variation**
+- **Skipped** (count of unparseable input lines; only shown when nonzero)
+- **Distinct** (distinct value count and duplicate percentage)
+- **Mean, Std Error, Median, Mode**
+- **Geometric Mean** (all-positive data only; suppressed under `-l`)
+- **Std Deviation, Variance, MAD, Coefficient of Variation**
 - **Q1, Q3, IQR, P95, P99** (plus custom percentiles via `-p`)
 - **Skewness** (symmetry) and **Kurtosis** (tailedness)
 - **Symmetry** (mirror-image detection about a center value; always computed, requires at least 3 values)
-- **Outliers** via IQR method (always) and Z-score method (when `-z` is set)
+- **Outliers** via IQR method (always), Z-score method, and modified z-score / Iglewicz-Hoaglin method (both when `-z` is set; modified z-scores resist masking by same-tail outliers)
 - **Histogram** (sorted data distribution) and **Trendline** (input order) using Unicode blocks
+- **Autocorrelation** (lag-1, input order) and **Input Order** (ascending/descending/constant/unordered); both suppressed under `-T`
 - **Trimmed Mean** (via `-t`), **EMA** (via `-e`)
 
 ### Guidelines

@@ -20,19 +20,33 @@ const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
 
-const PgmVersion string = "1.12.0"
+const PgmVersion string = "1.13.0"
+
+// madScale is the normal-consistency constant that makes the MAD directly
+// comparable to the standard deviation for normally distributed data.
+const madScale = 1.4826
+
+// modZScale is the Iglewicz-Hoaglin constant for modified z-scores,
+// approximately the reciprocal of madScale.
+const modZScale = 0.6745
 
 // Stats holds the computed statistical results.
 type Stats struct {
 	Count             int
+	SkippedLines      int // Input lines that failed to parse (blank lines excluded)
+	Distinct          int // Number of distinct values
 	Sum               float64
 	Mean              float64
+	StdErr            float64 // Standard error of the mean (StdDev / sqrt(n))
+	GeometricMean     float64 // Geometric mean; valid only when GeoMeanValid
+	GeoMeanValid      bool    // False when any value is non-positive or under log transform
 	Median            float64
 	Mode              []float64 // A dataset can have more than one mode
 	Min               float64
 	Max               float64
 	StdDev            float64 // Standard Deviation
 	Variance          float64 // Variance = StdDev^2
+	MAD               float64 // Median absolute deviation, scaled by madScale
 	Q1                float64 // 1st Quartile (25th percentile)
 	Q3                float64 // 3rd Quartile (75th percentile)
 	P95               float64 // 95th percentile
@@ -41,6 +55,7 @@ type Stats struct {
 	Outliers          []float64
 	ZScoreOutliers    []float64           // Outliers detected via Z-score method
 	ZScoreThreshold   float64             // Z-score threshold used (0 = disabled)
+	ModZOutliers      []float64           // Outliers detected via modified z-score (Iglewicz-Hoaglin)
 	Skewness          float64             // Formal skewness value
 	Kurtosis          float64             // Excess kurtosis
 	IsSymmetric       bool                // Dataset is a mirror image of itself about SymmetryCenter
@@ -52,6 +67,9 @@ type Stats struct {
 	CustomPercentiles map[float64]float64 // User-requested percentiles
 	Histogram         string              // Unicode histogram showing distribution
 	Trendline         string              // Unicode trendline showing sequence pattern
+	Autocorrelation   float64             // Lag-1 autocorrelation in input order; valid only when AutocorrValid
+	AutocorrValid     bool                // False when n < 3, zero variance, or dataset trimmed (-T)
+	InputOrder        string              // ascending, descending, constant, or unordered; empty when suppressed
 	TrimmedMean       float64
 	TrimmedMeanPct    float64 // 0 = disabled
 	TrimDatasetPct    float64 // 0 = disabled; trim dataset before all stats
@@ -108,6 +126,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if *emaSpan != 0 && *trimDatasetPct > 0 {
+		fmt.Fprintf(os.Stderr, "Error: -e and -T are mutually exclusive; EMA is order-dependent and -T sorts the dataset\n")
+		os.Exit(1)
+	}
+
 	if *version {
 		fmt.Printf("%s version %s\n%s\n\n%s\n%s\n", PgmName, PgmVersion, PgmUrl, PgmDisclaimer, PgmSeeAlso)
 		os.Exit(0)
@@ -136,7 +159,7 @@ func main() {
 		reader = file
 	}
 
-	numbers, err := readNumbers(reader)
+	numbers, skippedLines, err := readNumbers(reader)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading numbers: %v\n", err)
 		os.Exit(1)
@@ -186,10 +209,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	stats.SkippedLines = skippedLines
+
 	if *trimDatasetPct > 0 {
 		stats.TrimDatasetPct = *trimDatasetPct
 		stats.TrimDatasetOrigN = originalCount
+		// Order-aware statistics are artifacts of the -T sort, not trimmed statistics
 		stats.Trendline = ""
+		stats.AutocorrValid = false
+		stats.InputOrder = ""
+	}
+
+	if *logTransform {
+		// The arithmetic mean of logged values already is the log of the geometric mean
+		stats.GeoMeanValid = false
 	}
 
 	labelWidth := 18 // len("Quartile 1 (p25):")
@@ -201,6 +234,10 @@ func main() {
 	}
 	if *zScoreThreshold > 0 {
 		label := fmt.Sprintf("Z-Outliers (Z>%s):", formatFloat(*zScoreThreshold))
+		if len(label) > labelWidth {
+			labelWidth = len(label)
+		}
+		label = fmt.Sprintf("Mod Z-Outliers (Z>%s):", formatFloat(*zScoreThreshold))
 		if len(label) > labelWidth {
 			labelWidth = len(label)
 		}
@@ -233,8 +270,11 @@ func main() {
 }
 
 // readNumbers reads floating-point numbers (one per line) from an io.Reader.
-func readNumbers(reader io.Reader) ([]float64, error) {
+// It also returns the count of invalid lines that were skipped; blank lines
+// are skipped silently and do not count toward that total.
+func readNumbers(reader io.Reader) ([]float64, int, error) {
 	var numbers []float64
+	skipped := 0
 	scanner := bufio.NewScanner(reader)
 	lineNum := 0
 	for scanner.Scan() {
@@ -253,11 +293,12 @@ func readNumbers(reader io.Reader) ([]float64, error) {
 				lineNum,
 				scanner.Text(),
 			)
+			skipped++
 			continue
 		}
 		numbers = append(numbers, num)
 	}
-	return numbers, scanner.Err()
+	return numbers, skipped, scanner.Err()
 }
 
 // applyLogTransform applies natural log to all values, returning an error if any value is <= 0.
@@ -326,6 +367,15 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 		stats.StdDev = math.Sqrt(stats.Variance)
 	}
 
+	// --- Standard Error of the Mean ---
+	stats.StdErr = stats.StdDev / math.Sqrt(float64(count))
+
+	// --- Geometric Mean ---
+	if sortedData[0] > 0 {
+		stats.GeometricMean = calculateGeometricMean(data)
+		stats.GeoMeanValid = true
+	}
+
 	// --- Median, Q1, Q3, P95, P99 (Percentiles) ---
 	stats.Median = calculatePercentile(sortedData, 0.50)
 	stats.Q1 = calculatePercentile(sortedData, 0.25)
@@ -344,6 +394,9 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 	// --- IQR ---
 	stats.IQR = stats.Q3 - stats.Q1
 
+	// --- MAD (Median Absolute Deviation) ---
+	stats.MAD = calculateMAD(sortedData, stats.Median)
+
 	// --- Mode (single-pass efficient algorithm) ---
 	freqs := make(map[float64]int)
 	for _, v := range data {
@@ -360,6 +413,9 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 			modes = append(modes, val) // Found another mode
 		}
 	}
+
+	// --- Distinct Count ---
+	stats.Distinct = len(freqs)
 
 	// If the max frequency is 1, it means no number repeated, so there is no mode.
 	if maxFreq <= 1 {
@@ -390,6 +446,18 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 			}
 		}
 		sort.Float64s(stats.ZScoreOutliers)
+	}
+
+	// --- Modified Z-Score Outliers (Iglewicz-Hoaglin) ---
+	if stats.ZScoreThreshold > 0 && stats.MAD > 0 {
+		rawMAD := stats.MAD / madScale // unscaled median absolute deviation
+		for _, v := range data {
+			m := math.Abs(modZScale * (v - stats.Median) / rawMAD)
+			if m > zScoreThreshold {
+				stats.ModZOutliers = append(stats.ModZOutliers, v)
+			}
+		}
+		sort.Float64s(stats.ModZOutliers)
 	}
 
 	// --- Skewness (formal calculation) ---
@@ -428,6 +496,17 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 
 	// --- Trendline ---
 	stats.Trendline = generateTrendline(data, numBins)
+
+	// --- Lag-1 Autocorrelation ---
+	if count >= 3 && stats.StdDev > 0 {
+		stats.Autocorrelation = calculateAutocorrelation(data, stats.Mean)
+		stats.AutocorrValid = true
+	}
+
+	// --- Input Order Monotonicity ---
+	if count >= 2 {
+		stats.InputOrder = detectMonotonicity(data)
+	}
 
 	return stats, nil
 }
@@ -620,6 +699,94 @@ func calculateEMA(data []float64, span int) float64 {
 	return ema
 }
 
+// calculateMAD computes the median absolute deviation of sortedData about the given
+// median, scaled by madScale so it is directly comparable to the standard deviation
+// for normally distributed data. Divide the result by madScale to recover the raw
+// (unscaled) median absolute deviation.
+func calculateMAD(sortedData []float64, median float64) float64 {
+	deviations := make([]float64, len(sortedData))
+	for i, v := range sortedData {
+		deviations[i] = math.Abs(v - median)
+	}
+	sort.Float64s(deviations)
+	return madScale * calculatePercentile(deviations, 0.50)
+}
+
+// calculateGeometricMean computes the geometric mean as exp(mean(ln x)) to avoid
+// the overflow risk of a direct product. The caller must ensure all values are positive.
+func calculateGeometricMean(data []float64) float64 {
+	var logSum float64
+	for _, v := range data {
+		logSum += math.Log(v)
+	}
+	return math.Exp(logSum / float64(len(data)))
+}
+
+// calculateAutocorrelation computes the lag-1 autocorrelation of data in its original
+// input order. Returns 0 for fewer than 3 values or when the data has zero variance.
+func calculateAutocorrelation(data []float64, mean float64) float64 {
+	n := len(data)
+	if n < 3 {
+		return 0
+	}
+	var numerator, denominator float64
+	for i, v := range data {
+		d := v - mean
+		denominator += d * d
+		if i < n-1 {
+			numerator += d * (data[i+1] - mean)
+		}
+	}
+	if denominator == 0 {
+		return 0
+	}
+	return numerator / denominator
+}
+
+// detectMonotonicity reports whether data arrived in ascending, descending, constant,
+// or unordered input order. Ascending and descending are non-strict (ties allowed).
+func detectMonotonicity(data []float64) string {
+	nonDecreasing := true
+	nonIncreasing := true
+	for i := 1; i < len(data); i++ {
+		if data[i] < data[i-1] {
+			nonDecreasing = false
+		}
+		if data[i] > data[i-1] {
+			nonIncreasing = false
+		}
+	}
+	if nonDecreasing && nonIncreasing {
+		return "constant"
+	}
+	if nonDecreasing {
+		return "ascending"
+	}
+	if nonIncreasing {
+		return "descending"
+	}
+	return "unordered"
+}
+
+// interpretAutocorrelation provides a human-readable label for a lag-1 autocorrelation value.
+func interpretAutocorrelation(r float64) string {
+	absR := math.Abs(r)
+	if absR < 0.2 {
+		return "no serial dependence"
+	}
+	direction := "positive"
+	if r < 0 {
+		direction = "negative"
+	}
+	if absR < 0.5 {
+		return "weak " + direction + " serial dependence"
+	}
+	if absR < 0.8 {
+		return "moderate " + direction + " serial dependence"
+	}
+	return "strong " + direction + " serial dependence"
+}
+
 // interpretKurtosis provides a human-readable label for a kurtosis value.
 func interpretKurtosis(k float64) string {
 	if k < -1 {
@@ -694,13 +861,30 @@ func padLabel(label string, labelWidth int) string {
 
 // printStats displays the results in a readable format.
 func printStats(s *Stats, labelWidth int) {
+	star := ""
+	if s.TrimDatasetPct > 0 {
+		star = "*"
+	}
 	fmt.Println("--- Descriptive Statistics ---")
 	fmt.Printf("%s%d\n", padLabel("Count:", labelWidth), s.Count)
+	if s.SkippedLines > 0 {
+		lineWord := "lines"
+		if s.SkippedLines == 1 {
+			lineWord = "line"
+		}
+		fmt.Printf("%s%d invalid %s\n", padLabel("Skipped:", labelWidth), s.SkippedLines, lineWord)
+	}
+	dupPct := float64(s.Count-s.Distinct) / float64(s.Count) * 100
+	fmt.Printf("%s%d of %d (%s%% duplicated)\n", padLabel("Distinct:", labelWidth), s.Distinct, s.Count, formatFloat(dupPct))
 	fmt.Printf("%s%s\n", padLabel("Sum:", labelWidth), formatFloat(s.Sum))
 	fmt.Printf("%s%s\n", padLabel("Min:", labelWidth), formatFloat(s.Min))
 	fmt.Printf("%s%s\n", padLabel("Max:", labelWidth), formatFloat(s.Max))
 	fmt.Println("\n--- Measures of Central Tendency ---")
 	fmt.Printf("%s%s\n", padLabel("Mean:", labelWidth), formatFloat(s.Mean))
+	fmt.Printf("%s%s\n", padLabel("Std Error:", labelWidth), formatFloat(s.StdErr))
+	if s.GeoMeanValid {
+		fmt.Printf("%s%s\n", padLabel("Geometric Mean:", labelWidth), formatFloat(s.GeometricMean))
+	}
 	if s.TrimmedMeanPct > 0 {
 		label := fmt.Sprintf("Trimmed Mean (%s%%):", formatFloat(s.TrimmedMeanPct))
 		fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloat(s.TrimmedMean))
@@ -725,6 +909,7 @@ func printStats(s *Stats, labelWidth int) {
 	fmt.Println("\n--- Measures of Spread & Distribution ---")
 	fmt.Printf("%s%s\n", padLabel("Std Deviation:", labelWidth), formatFloat(s.StdDev))
 	fmt.Printf("%s%s\n", padLabel("Variance:", labelWidth), formatFloat(s.Variance))
+	fmt.Printf("%s%s\n", padLabel("MAD"+star+":", labelWidth), formatFloat(s.MAD))
 	if !s.CVValid {
 		fmt.Printf("%s%s\n", padLabel("CV:", labelWidth), "N/A - mean near zero")
 	} else {
@@ -736,10 +921,6 @@ func printStats(s *Stats, labelWidth int) {
 	}
 	fmt.Printf("%s%s\n", padLabel("Quartile 1 (p25):", labelWidth), formatFloat(s.Q1))
 	fmt.Printf("%s%s\n", padLabel("Quartile 3 (p75):", labelWidth), formatFloat(s.Q3))
-	star := ""
-	if s.TrimDatasetPct > 0 {
-		star = "*"
-	}
 	allPercentiles := map[float64]float64{95: s.P95, 99: s.P99}
 	for k, v := range s.CustomPercentiles {
 		allPercentiles[k] = v
@@ -785,14 +966,32 @@ func printStats(s *Stats, labelWidth int) {
 		} else {
 			fmt.Printf("%s%s\n", padLabel(label, labelWidth), "None")
 		}
+		label = fmt.Sprintf("Mod Z-Outliers (Z>%s)%s:", formatFloat(s.ZScoreThreshold), star)
+		if s.MAD == 0 {
+			fmt.Printf("%s%s\n", padLabel(label, labelWidth), "N/A - MAD is zero")
+		} else if len(s.ModZOutliers) > 0 {
+			fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloatSlice(s.ModZOutliers))
+		} else {
+			fmt.Printf("%s%s\n", padLabel(label, labelWidth), "None")
+		}
 	}
-	if s.Histogram != "" || s.Trendline != "" {
+	if s.Histogram != "" || s.Trendline != "" || s.AutocorrValid || s.InputOrder != "" {
 		fmt.Printf("\n--- Distribution ---\n")
 		if s.Histogram != "" {
 			fmt.Printf("%s%s\n", padLabel("Histogram:", labelWidth), s.Histogram)
 		}
 		if s.Trendline != "" {
 			fmt.Printf("%s%s\n", padLabel("Trendline:", labelWidth), s.Trendline)
+		}
+		if s.AutocorrValid {
+			fmt.Printf("%s%s (%s)\n", padLabel("Autocorrelation:", labelWidth), formatFloat(s.Autocorrelation), interpretAutocorrelation(s.Autocorrelation))
+		}
+		if s.InputOrder != "" {
+			orderStr := s.InputOrder
+			if s.InputOrder == "ascending" || s.InputOrder == "descending" {
+				orderStr += " WARNING: trendline and autocorrelation reflect this sort order, not a property of the data"
+			}
+			fmt.Printf("%s%s\n", padLabel("Input Order:", labelWidth), orderStr)
 		}
 	}
 	if s.TrimDatasetPct > 0 {

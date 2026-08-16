@@ -337,7 +337,7 @@ invalid
 40
 `
 	reader := strings.NewReader(input)
-	numbers, err := readNumbers(reader)
+	numbers, skipped, err := readNumbers(reader)
 	if err != nil {
 		t.Fatalf("readNumbers returned error: %v", err)
 	}
@@ -345,6 +345,10 @@ invalid
 	expected := []float64{10, 20.5, 30.00, 40}
 	if !floatSliceEquals(numbers, expected) {
 		t.Errorf("readNumbers: got %v, expected %v", numbers, expected)
+	}
+	// One unparseable line ("invalid"); the blank line must not count
+	if skipped != 1 {
+		t.Errorf("skipped: got %d, expected 1", skipped)
 	}
 }
 
@@ -448,12 +452,15 @@ func TestCVSingleValue(t *testing.T) {
 
 func TestReadNumbersEmpty(t *testing.T) {
 	reader := strings.NewReader("")
-	numbers, err := readNumbers(reader)
+	numbers, skipped, err := readNumbers(reader)
 	if err != nil {
 		t.Fatalf("readNumbers returned error: %v", err)
 	}
 	if len(numbers) != 0 {
 		t.Errorf("expected empty slice, got %v", numbers)
+	}
+	if skipped != 0 {
+		t.Errorf("skipped: got %d, expected 0", skipped)
 	}
 }
 
@@ -1029,5 +1036,307 @@ func TestSymmetryOutputLine(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("Symmetry line not found in output:\n%s", string(output))
+	}
+}
+
+func TestReadNumbersSkipped(t *testing.T) {
+	input := `10
+
+not-a-number
+20
+
+abc
+30
+`
+	reader := strings.NewReader(input)
+	numbers, skipped, err := readNumbers(reader)
+	if err != nil {
+		t.Fatalf("readNumbers returned error: %v", err)
+	}
+	expected := []float64{10, 20, 30}
+	if !floatSliceEquals(numbers, expected) {
+		t.Errorf("readNumbers: got %v, expected %v", numbers, expected)
+	}
+	// Two unparseable lines; the two blank lines must not count toward skipped
+	if skipped != 2 {
+		t.Errorf("skipped: got %d, expected 2", skipped)
+	}
+}
+
+func TestDistinctCount(t *testing.T) {
+	tests := []struct {
+		name        string
+		data        []float64
+		distinct    int
+		expectedPct float64
+	}{
+		{"All unique", []float64{1, 2, 3, 4, 5}, 5, 0},
+		// testData has 31 values; 50 appears 4 times, so 3 duplicates: 3/31*100 = 9.6774%
+		{"Repeated 50s", testData, 28, 9.6774},
+		{"All identical", []float64{7, 7, 7, 7}, 1, 75},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stats, err := computeStats(tc.data, nil, 1.5, 16, 0, 0, 0)
+			if err != nil {
+				t.Fatalf("computeStats returned error: %v", err)
+			}
+			if stats.Distinct != tc.distinct {
+				t.Errorf("Distinct: got %d, expected %d", stats.Distinct, tc.distinct)
+			}
+			dupPct := float64(stats.Count-stats.Distinct) / float64(stats.Count) * 100
+			if !floatEquals(dupPct, tc.expectedPct) {
+				t.Errorf("duplicate percentage: got %v, expected %v", dupPct, tc.expectedPct)
+			}
+		})
+	}
+}
+
+func TestCalculateMAD(t *testing.T) {
+	// Hand-computed case for {1..9}:
+	// median = 5
+	// |x - 5| = {4,3,2,1,0,1,2,3,4}, sorted = {0,1,1,2,2,3,3,4,4}
+	// median of deviations = 2
+	// scaled MAD = 1.4826 * 2 = 2.9652
+	t.Run("HandComputed", func(t *testing.T) {
+		data := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9}
+		got := calculateMAD(data, 5)
+		if !floatEquals(got, 2.9652) {
+			t.Errorf("calculateMAD: got %v, expected 2.9652", got)
+		}
+	})
+
+	// More than half the values are identical:
+	// median = 5, |x - 5| = {0,0,0,2}, median of deviations = 0, MAD = 0
+	t.Run("ZeroMAD", func(t *testing.T) {
+		data := []float64{5, 5, 5, 7}
+		got := calculateMAD(data, 5)
+		if !floatEquals(got, 0) {
+			t.Errorf("calculateMAD: got %v, expected 0", got)
+		}
+	})
+
+	t.Run("ViaComputeStats", func(t *testing.T) {
+		stats, err := computeStats(testData, nil, 1.5, 16, 0, 0, 0)
+		if err != nil {
+			t.Fatalf("computeStats returned error: %v", err)
+		}
+		// median = 50, median of |x - 50| = 25, scaled: 1.4826 * 25 = 37.065
+		if !floatEquals(stats.MAD, 37.065) {
+			t.Errorf("MAD: got %v, expected 37.065", stats.MAD)
+		}
+	})
+}
+
+// maskingData holds a tight cluster with two adjacent outliers on the same tail.
+// The outliers inflate the mean (17.775) and standard deviation (15.541) enough to
+// suppress their own classic z-scores: z(50) = 2.0736, z(52) = 2.2022 — both below
+// a 2.5 threshold. The modified z-scores use median (11.35) and raw MAD (0.75),
+// which the outliers cannot inflate: modZ(50) = 34.76, modZ(52) = 36.56.
+var maskingData = []float64{10, 10.2, 10.5, 10.8, 11, 11.2, 11.5, 11.8, 12, 12.3, 50, 52}
+
+func TestModifiedZScoreOutliers(t *testing.T) {
+	stats, err := computeStats(maskingData, nil, 1.5, 16, 2.5, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+
+	// Classic z-score detection is masked: neither outlier reaches |z| > 2.5
+	if len(stats.ZScoreOutliers) != 0 {
+		t.Errorf("ZScoreOutliers: got %v, expected none (masking)", stats.ZScoreOutliers)
+	}
+
+	// Modified z-score detection catches both at the same threshold
+	expected := []float64{50, 52}
+	if !floatSliceEquals(stats.ModZOutliers, expected) {
+		t.Errorf("ModZOutliers: got %v, expected %v", stats.ModZOutliers, expected)
+	}
+}
+
+func TestModifiedZScoreZeroMAD(t *testing.T) {
+	// More than half identical: MAD = 0, so modified z-scores are undefined
+	stats, err := computeStats([]float64{5, 5, 5, 5, 9}, nil, 1.5, 16, 2.0, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if !floatEquals(stats.MAD, 0) {
+		t.Errorf("MAD: got %v, expected 0", stats.MAD)
+	}
+	if stats.ModZOutliers != nil {
+		t.Errorf("ModZOutliers with zero MAD: got %v, expected nil", stats.ModZOutliers)
+	}
+}
+
+func TestStandardError(t *testing.T) {
+	stats, err := computeStats(testData, nil, 1.5, 16, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	// StdDev 33.5751 / sqrt(31) = 6.0303
+	if !floatEquals(stats.StdErr, 6.0303) {
+		t.Errorf("StdErr: got %v, expected 6.0303", stats.StdErr)
+	}
+
+	single, err := computeStats([]float64{42.5}, nil, 1.5, 16, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if !floatEquals(single.StdErr, 0) {
+		t.Errorf("StdErr for single value: got %v, expected 0", single.StdErr)
+	}
+}
+
+func TestGeometricMean(t *testing.T) {
+	// Closed-form case: geometric mean of {1,2,4,8} is (1*2*4*8)^(1/4) = 2^1.5 = 2.8284
+	t.Run("ClosedForm", func(t *testing.T) {
+		got := calculateGeometricMean([]float64{1, 2, 4, 8})
+		if !floatEquals(got, 2.8284) {
+			t.Errorf("calculateGeometricMean: got %v, expected 2.8284", got)
+		}
+	})
+
+	// Geometric mean never exceeds the arithmetic mean for positive data
+	t.Run("OrderingVsArithmetic", func(t *testing.T) {
+		stats, err := computeStats(testData, nil, 1.5, 16, 0, 0, 0)
+		if err != nil {
+			t.Fatalf("computeStats returned error: %v", err)
+		}
+		if !stats.GeoMeanValid {
+			t.Fatal("GeoMeanValid: got false, expected true for all-positive data")
+		}
+		if !floatEquals(stats.GeometricMean, 38.2248) {
+			t.Errorf("GeometricMean: got %v, expected 38.2248", stats.GeometricMean)
+		}
+		if stats.GeometricMean > stats.Mean {
+			t.Errorf("GeometricMean (%v) should not exceed Mean (%v)", stats.GeometricMean, stats.Mean)
+		}
+	})
+
+	// Suppressed when data contains zero or negative values
+	t.Run("SuppressedOnNonPositive", func(t *testing.T) {
+		withZero, err := computeStats([]float64{0, 1, 2, 3}, nil, 1.5, 16, 0, 0, 0)
+		if err != nil {
+			t.Fatalf("computeStats returned error: %v", err)
+		}
+		if withZero.GeoMeanValid {
+			t.Error("GeoMeanValid: got true, expected false for data containing zero")
+		}
+		withNegative, err := computeStats([]float64{-1, 1, 2, 3}, nil, 1.5, 16, 0, 0, 0)
+		if err != nil {
+			t.Fatalf("computeStats returned error: %v", err)
+		}
+		if withNegative.GeoMeanValid {
+			t.Error("GeoMeanValid: got true, expected false for data containing a negative value")
+		}
+	})
+}
+
+func TestCalculateAutocorrelation(t *testing.T) {
+	ascending := make([]float64, 20)
+	for i := range ascending {
+		ascending[i] = float64(i + 1)
+	}
+	// Deterministic shuffle of 1..20 chosen for near-zero lag-1 autocorrelation
+	shuffled := []float64{5, 3, 6, 12, 10, 2, 7, 14, 19, 9, 18, 1, 11, 20, 8, 13, 4, 17, 16, 15}
+
+	tests := []struct {
+		name     string
+		data     []float64
+		expected float64
+	}{
+		{"Ascending", ascending, 0.85},
+		{"Alternating", []float64{1, -1, 1, -1, 1, -1, 1, -1, 1, -1}, -0.9},
+		{"Shuffled", shuffled, -0.0064},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var sum float64
+			for _, v := range tc.data {
+				sum += v
+			}
+			mean := sum / float64(len(tc.data))
+			got := calculateAutocorrelation(tc.data, mean)
+			if !floatEquals(got, tc.expected) {
+				t.Errorf("calculateAutocorrelation: got %v, expected %v", got, tc.expected)
+			}
+		})
+	}
+
+	t.Run("FewerThanThree", func(t *testing.T) {
+		got := calculateAutocorrelation([]float64{1, 2}, 1.5)
+		if got != 0 {
+			t.Errorf("expected 0 for fewer than 3 values, got %v", got)
+		}
+	})
+
+	t.Run("ZeroVariance", func(t *testing.T) {
+		got := calculateAutocorrelation([]float64{5, 5, 5, 5}, 5)
+		if got != 0 {
+			t.Errorf("expected 0 for zero variance, got %v", got)
+		}
+	})
+}
+
+func TestDetectMonotonicity(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     []float64
+		expected string
+	}{
+		{"Ascending with ties", []float64{1, 2, 2, 3, 4}, "ascending"},
+		{"Descending with ties", []float64{9, 7, 7, 2}, "descending"},
+		{"Unordered", testData, "unordered"},
+		{"All identical", []float64{5, 5, 5}, "constant"},
+		{"Two ascending", []float64{1, 2}, "ascending"},
+		{"Two descending", []float64{2, 1}, "descending"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := detectMonotonicity(tc.data)
+			if got != tc.expected {
+				t.Errorf("detectMonotonicity: got %q, expected %q", got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestOrderStatisticsSuppressedUnderTrim(t *testing.T) {
+	cmd := exec.Command("go", "run", "stats.go", "-T", "10", "test_data.txt")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go run failed: %v\n%s", err, string(output))
+	}
+	for _, label := range []string{"Trendline:", "Autocorrelation:", "Input Order:"} {
+		if strings.Contains(string(output), label) {
+			t.Errorf("expected no %q line under -T, got:\n%s", label, string(output))
+		}
+	}
+	if !strings.Contains(string(output), "MAD*:") {
+		t.Errorf("expected starred MAD line under -T, got:\n%s", string(output))
+	}
+}
+
+func TestGeometricSuppressedUnderLogTransform(t *testing.T) {
+	cmd := exec.Command("go", "run", "stats.go", "-l", "test_data.txt")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go run failed: %v\n%s", err, string(output))
+	}
+	if strings.Contains(string(output), "Geometric Mean") {
+		t.Errorf("expected no Geometric Mean line under -l, got:\n%s", string(output))
+	}
+}
+
+func TestEMATrimDatasetMutualExclusion(t *testing.T) {
+	cmd := exec.Command("go", "run", "stats.go", "-e", "5", "-T", "10", "test_data.txt")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("Expected error when using both -e and -T, but got none")
+	}
+	if !strings.Contains(string(output), "mutually exclusive") {
+		t.Errorf("Expected mutual exclusion error message, got: %s", string(output))
 	}
 }

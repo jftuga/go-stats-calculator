@@ -10,6 +10,15 @@ set -e
 DATA="5 10 15.5 20 25 30 35 40 45 50 55 60 65 70 75.25 80 85 90 95 100 12.5 37.5 62.5 87.5 50 50 50 3 150 7.75 42"
 COUNT=31
 
+# run_stats runs the built binary if present, otherwise falls back to go run
+run_stats() {
+    if [[ -f "./stats" ]]; then
+        ./stats "$@"
+    else
+        go run stats.go "$@"
+    fi
+}
+
 echo "=============================================="
 echo "Independent Verification of Stats Calculator"
 echo "Using bc (arbitrary precision calculator)"
@@ -66,6 +75,10 @@ printf "%-20s %.10f\n" "Std Deviation:" "$STDDEV"
 # Coefficient of Variation
 CV=$(echo "scale=10; ($STDDEV / $MEAN) * 100" | bc -l)
 printf "%-20s %.10f%%\n" "CV:" "$CV"
+
+# Standard Error of the Mean
+STDERR=$(echo "scale=10; $STDDEV / sqrt($COUNT)" | bc -l)
+printf "%-20s %.10f\n" "Std Error:" "$STDERR"
 
 # Percentile calculations
 # Formula: rank = p * (n-1), then linear interpolation
@@ -130,6 +143,16 @@ IQR=$(echo "scale=10; $Q3 - $Q1" | bc -l)
 echo ""
 printf "%-20s %s\n" "IQR (Q3 - Q1):" "$IQR"
 
+# MAD (Median Absolute Deviation), scaled by the normal-consistency constant 1.4826
+echo ""
+echo "--- MAD (Median Absolute Deviation) ---"
+DEV_SORTED=($(for val in "${SORTED_ARRAY[@]}"; do echo "scale=10; x = $val - $MEDIAN; if (x < 0) -x else x" | bc -l; done | sort -n))
+# 31 deviations: the median is the element at 0-based index 15
+MAD_RAW=${DEV_SORTED[15]}
+MAD_SCALED=$(echo "scale=10; 1.4826 * $MAD_RAW" | bc -l)
+printf "%-20s %s\n" "Raw MAD:" "$MAD_RAW"
+printf "%-20s %.10f\n" "Scaled MAD:" "$MAD_SCALED"
+
 # Min and Max
 MIN=${SORTED_ARRAY[0]}
 MAX=${SORTED_ARRAY[$((COUNT - 1))]}
@@ -160,6 +183,37 @@ SUM_FOURTH=$(echo "$KURT_EXPR" | bc -l)
 KURTOSIS=$(echo "scale=10; ($COUNT * ($COUNT + 1)) / (($COUNT - 1) * ($COUNT - 2) * ($COUNT - 3)) * $SUM_FOURTH - 3 * ($COUNT - 1)^2 / (($COUNT - 2) * ($COUNT - 3))" | bc -l)
 printf "%-20s %.10f\n" "Kurtosis:" "$KURTOSIS"
 
+# Geometric Mean: exp(mean(ln x)), valid because all test values are positive
+echo ""
+echo "--- Geometric Mean, Distinct, Autocorrelation ---"
+GEO_LOG_SUM="0"
+for val in $DATA; do
+    GEO_LOG_SUM=$(echo "scale=10; $GEO_LOG_SUM + l($val)" | bc -l)
+done
+GEOMEAN=$(echo "scale=10; e($GEO_LOG_SUM / $COUNT)" | bc -l)
+printf "%-20s %.10f\n" "Geometric Mean:" "$GEOMEAN"
+
+# Distinct count and duplicate percentage
+DISTINCT=$(echo "$DATA" | tr ' ' '\n' | sort -n | uniq | wc -l | tr -d ' ')
+DUP_PCT=$(echo "scale=10; ($COUNT - $DISTINCT) * 100 / $COUNT" | bc -l)
+printf "%-20s %s\n" "Distinct:" "$DISTINCT"
+printf "%-20s %.10f%%\n" "Duplicate Pct:" "$DUP_PCT"
+
+# Lag-1 autocorrelation: sum((x_i - mean) * (x_i+1 - mean)) / sum((x_i - mean)^2)
+# Numerator uses input order; denominator is the sum of squared deviations (SSQ)
+AC_NUM_EXPR="scale=10; "
+PREV=""
+for val in $DATA; do
+    if [[ -n "$PREV" ]]; then
+        AC_NUM_EXPR+="($PREV - $MEAN) * ($val - $MEAN) + "
+    fi
+    PREV=$val
+done
+AC_NUM_EXPR+="0"
+AC_NUM=$(echo "$AC_NUM_EXPR" | bc -l)
+AUTOCORR=$(echo "scale=10; $AC_NUM / $SSQ" | bc -l)
+printf "%-20s %.10f\n" "Autocorrelation:" "$AUTOCORR"
+
 # Z-Score Outliers (threshold = 2.0)
 echo ""
 echo "--- Z-Score Outliers (threshold=2.0) ---"
@@ -179,6 +233,23 @@ if [[ $Z_OUTLIER_COUNT -eq 0 ]]; then
     echo "  No Z-score outliers found"
 fi
 printf "%-20s %d\n" "Z-Outlier Count:" "$Z_OUTLIER_COUNT"
+
+# Modified Z-Score Outliers (Iglewicz-Hoaglin: 0.6745 * (x - median) / raw MAD)
+echo ""
+echo "--- Modified Z-Score Outliers (threshold=2.0) ---"
+MODZ_OUTLIER_COUNT=0
+for val in $DATA; do
+    MODZ=$(echo "scale=10; x = 0.6745 * ($val - $MEDIAN) / $MAD_RAW; if (x < 0) -x else x" | bc -l)
+    IS_OUTLIER=$(echo "$MODZ > $Z_THRESHOLD" | bc -l)
+    if [[ "$IS_OUTLIER" == "1" ]]; then
+        printf "  %s has modified Z=%.4f > %s (OUTLIER)\n" "$val" "$MODZ" "$Z_THRESHOLD"
+        MODZ_OUTLIER_COUNT=$((MODZ_OUTLIER_COUNT + 1))
+    fi
+done
+if [[ $MODZ_OUTLIER_COUNT -eq 0 ]]; then
+    echo "  No modified z-score outliers found"
+fi
+printf "%-20s %d\n" "Mod Z-Outlier Count:" "$MODZ_OUTLIER_COUNT"
 
 # Now run the actual program and compare
 echo ""
@@ -227,6 +298,12 @@ PROG_SKEWNESS=$(echo "$PROGRAM_OUTPUT" | grep "^Skewness:" | awk '{print $2}')
 PROG_KURTOSIS=$(echo "$PROGRAM_OUTPUT" | grep "^Kurtosis:" | awk '{print $2}')
 PROG_MIN=$(extract_value "Min:")
 PROG_MAX=$(extract_value "Max:")
+PROG_STDERR=$(extract_value "Std Error:")
+PROG_GEOMEAN=$(extract_value "Geometric Mean:")
+PROG_MAD=$(extract_value "MAD:")
+PROG_DISTINCT=$(echo "$PROGRAM_OUTPUT" | grep "^Distinct:" | awk '{print $2}')
+PROG_DUP_PCT=$(echo "$PROGRAM_OUTPUT" | grep "^Distinct:" | awk '{print $5}' | tr -d '(%')
+PROG_AUTOCORR=$(echo "$PROGRAM_OUTPUT" | grep "^Autocorrelation:" | awk '{print $2}')
 
 # Comparison function (using bc for float comparison)
 FAILURES=0
@@ -274,6 +351,12 @@ compare_values "P95" "$P95" "$PROG_P95"
 compare_values "P99" "$P99" "$PROG_P99"
 compare_values "IQR" "$IQR" "$PROG_IQR"
 compare_values "CV (%)" "$CV" "$PROG_CV"
+compare_values "StdErr" "$STDERR" "$PROG_STDERR"
+compare_values "GeoMean" "$GEOMEAN" "$PROG_GEOMEAN"
+compare_values "MAD" "$MAD_SCALED" "$PROG_MAD"
+compare_values "Distinct" "$DISTINCT" "$PROG_DISTINCT"
+compare_values "Dup Pct (%)" "$DUP_PCT" "$PROG_DUP_PCT"
+compare_values "Autocorr" "$AUTOCORR" "$PROG_AUTOCORR"
 compare_values "Skewness" "$SKEWNESS" "$PROG_SKEWNESS"
 compare_values "Kurtosis" "$KURTOSIS" "$PROG_KURTOSIS"
 
@@ -291,6 +374,43 @@ if [[ -n "$PROG_Z_LINE" ]]; then
 else
     printf "| %-12s | %15s | %15s | %-6s |\n" "Z-Outliers" "$Z_OUTLIER_COUNT" "N/A" "SKIP"
     FAILURES=$((FAILURES + 1))
+fi
+
+# Extract modified z-score outlier count from program output
+PROG_MODZ_LINE=$(echo "$PROGRAM_OUTPUT" | grep "^Mod Z-Outliers" || true)
+if [[ -n "$PROG_MODZ_LINE" ]]; then
+    PROG_MODZ_CONTENT=$(echo "$PROG_MODZ_LINE" | sed 's/.*\[//' | sed 's/\].*//')
+    if [[ "$PROG_MODZ_CONTENT" == *"None"* ]] || [[ -z "$PROG_MODZ_CONTENT" ]]; then
+        PROG_MODZ_COUNT=0
+    else
+        PROG_MODZ_COUNT=$(echo "$PROG_MODZ_CONTENT" | wc -w | tr -d ' ')
+    fi
+    compare_values "Mod Z-Out" "$MODZ_OUTLIER_COUNT" "$PROG_MODZ_COUNT"
+else
+    printf "| %-12s | %15s | %15s | %-6s |\n" "Mod Z-Out" "$MODZ_OUTLIER_COUNT" "N/A" "SKIP"
+    FAILURES=$((FAILURES + 1))
+fi
+echo ""
+
+# --- Structural checks on the main output (v1.12.0 / v1.13.0 lines) ---
+echo "--- Structural Checks (main output) ---"
+if echo "$PROGRAM_OUTPUT" | grep -q "^Symmetry:.*None"; then
+    echo "PASS: Symmetry reports None for the asymmetric dataset"
+else
+    echo "FAIL: expected 'Symmetry: None'"
+    FAILURES=$((FAILURES + 1))
+fi
+if echo "$PROGRAM_OUTPUT" | grep -q "^Input Order:.*unordered"; then
+    echo "PASS: Input Order reports unordered"
+else
+    echo "FAIL: expected 'Input Order: unordered'"
+    FAILURES=$((FAILURES + 1))
+fi
+if echo "$PROGRAM_OUTPUT" | grep -q "^Skipped:"; then
+    echo "FAIL: Skipped line should be absent for clean input"
+    FAILURES=$((FAILURES + 1))
+else
+    echo "PASS: no Skipped line for clean input"
 fi
 echo ""
 
@@ -390,6 +510,102 @@ compare_values "Log StdDev" "$LOG_STDDEV" "$PROG_LOG_STDDEV"
 compare_values "Log Variance" "$LOG_VARIANCE" "$PROG_LOG_VARIANCE"
 echo ""
 
+# --- Symmetry Verification (v1.12.0) ---
+echo "=============================================="
+echo "Symmetry Verification"
+echo "=============================================="
+echo ""
+
+# Same 40-value fixture as symmetricTestData in stats_test.go:
+# 20 disjoint pairs, each summing to 1000, symmetric about 500
+SYMDATA="612 137 827 495 958 264 709 19 882 455 349 736 88 981 545 233 61 694 42 767 388 118 912 651 306 994 173 588 505 377 863 220 939 6 623 780 151 849 291 412"
+SYM_COUNT=40
+SYM_SORTED=($(echo "$SYMDATA" | tr ' ' '\n' | sort -n))
+
+# Independently verify every sorted pair sums to 2 * center, pairing from both ends inward
+SYM_CENTER=$(echo "scale=10; (${SYM_SORTED[0]} + ${SYM_SORTED[$((SYM_COUNT - 1))]}) / 2" | bc -l)
+PAIR_FAILURES=0
+for i in $(seq 0 $((SYM_COUNT / 2 - 1))); do
+    PAIR_SUM=$(echo "${SYM_SORTED[$i]} + ${SYM_SORTED[$((SYM_COUNT - 1 - i))]}" | bc -l)
+    MATCH=$(echo "$PAIR_SUM == 2 * $SYM_CENTER" | bc -l)
+    if [[ "$MATCH" != "1" ]]; then
+        echo "FAIL: pair ${SYM_SORTED[$i]} + ${SYM_SORTED[$((SYM_COUNT - 1 - i))]} = $PAIR_SUM, expected $(echo "2 * $SYM_CENTER" | bc -l)"
+        PAIR_FAILURES=$((PAIR_FAILURES + 1))
+    fi
+done
+if [[ $PAIR_FAILURES -eq 0 ]]; then
+    printf "PASS: all %d sorted pairs sum to 2 * center (center=%.0f)\n" $((SYM_COUNT / 2)) "$SYM_CENTER"
+else
+    FAILURES=$((FAILURES + PAIR_FAILURES))
+fi
+
+TMPFILE5=$(mktemp)
+echo "$SYMDATA" | tr ' ' '\n' > "$TMPFILE5"
+SYM_OUTPUT=$(run_stats "$TMPFILE5")
+rm "$TMPFILE5"
+
+if echo "$SYM_OUTPUT" | grep -qF "Symmetric about 500 (20 pairs)"; then
+    echo "PASS: program reports 'Symmetric about 500 (20 pairs)'"
+else
+    echo "FAIL: program did not report the expected symmetry line"
+    FAILURES=$((FAILURES + 1))
+fi
+echo ""
+
+# --- Skipped Lines Verification (v1.13.0) ---
+echo "=============================================="
+echo "Skipped Lines Verification"
+echo "=============================================="
+echo ""
+
+# 2 invalid lines (abc, xyz); the 2 blank lines must not be counted
+TMPFILE6=$(mktemp)
+printf '10\n\nabc\n20\n\nxyz\n30\n' > "$TMPFILE6"
+SKIP_OUTPUT=$(run_stats "$TMPFILE6" 2>/dev/null)
+rm "$TMPFILE6"
+
+SKIP_COUNT=$(echo "$SKIP_OUTPUT" | grep "^Skipped:" | awk '{print $2}' || true)
+if [[ "$SKIP_COUNT" == "2" ]]; then
+    echo "PASS: Skipped reports 2 invalid lines (blank lines not counted)"
+else
+    echo "FAIL: Skipped count is '$SKIP_COUNT', expected 2"
+    FAILURES=$((FAILURES + 1))
+fi
+SKIP_DATA_COUNT=$(echo "$SKIP_OUTPUT" | grep "^Count:" | awk '{print $2}' || true)
+if [[ "$SKIP_DATA_COUNT" == "3" ]]; then
+    echo "PASS: Count is 3 valid values"
+else
+    echo "FAIL: Count is '$SKIP_DATA_COUNT', expected 3"
+    FAILURES=$((FAILURES + 1))
+fi
+echo ""
+
+# --- Input Order Verification (v1.13.0) ---
+echo "=============================================="
+echo "Input Order Verification (sorted input)"
+echo "=============================================="
+echo ""
+
+TMPFILE7=$(mktemp)
+echo "$DATA" | tr ' ' '\n' | sort -n > "$TMPFILE7"
+ORDER_OUTPUT=$(run_stats "$TMPFILE7")
+rm "$TMPFILE7"
+
+ORDER_LINE=$(echo "$ORDER_OUTPUT" | grep "^Input Order:" || true)
+if echo "$ORDER_LINE" | grep -q "ascending"; then
+    echo "PASS: sorted input reports ascending"
+else
+    echo "FAIL: sorted input did not report ascending: $ORDER_LINE"
+    FAILURES=$((FAILURES + 1))
+fi
+if echo "$ORDER_LINE" | grep -q "WARNING"; then
+    echo "PASS: sorted input carries the sort-order warning"
+else
+    echo "FAIL: sorted input is missing the sort-order warning"
+    FAILURES=$((FAILURES + 1))
+fi
+echo ""
+
 # --- Trim Dataset (-T) Verification ---
 echo "=============================================="
 echo "Trim Dataset Verification (-T 10)"
@@ -454,6 +670,39 @@ if [[ -n "$TRIMD_FOOTNOTE" ]]; then
     echo "PASS: Footnote present"
 else
     echo "FAIL: Footnote not found"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Verify MAD carries the trimmed-dataset star (v1.13.0)
+if echo "$TRIMD_OUTPUT" | grep -q "^MAD\*:"; then
+    echo "PASS: MAD is starred under -T"
+else
+    echo "FAIL: MAD should carry * under -T"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Verify order-aware statistics are suppressed, like the Trendline (v1.13.0)
+for LABEL in "Autocorrelation:" "Input Order:"; do
+    if echo "$TRIMD_OUTPUT" | grep -q "^$LABEL"; then
+        echo "FAIL: $LABEL should be absent under -T"
+        FAILURES=$((FAILURES + 1))
+    else
+        echo "PASS: $LABEL absent under -T"
+    fi
+done
+
+# Verify -e and -T are mutually exclusive (v1.13.0)
+TMPFILE8=$(mktemp)
+echo "$DATA" | tr ' ' '\n' > "$TMPFILE8"
+set +e
+EXCL_OUTPUT=$(run_stats -e 5 -T 10 "$TMPFILE8" 2>&1)
+EXCL_STATUS=$?
+set -e
+rm "$TMPFILE8"
+if [[ $EXCL_STATUS -ne 0 ]] && echo "$EXCL_OUTPUT" | grep -q "mutually exclusive"; then
+    echo "PASS: -e and -T are mutually exclusive"
+else
+    echo "FAIL: expected -e/-T mutual exclusion error (exit=$EXCL_STATUS)"
     FAILURES=$((FAILURES + 1))
 fi
 
