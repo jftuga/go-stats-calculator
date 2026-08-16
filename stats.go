@@ -20,7 +20,7 @@ const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
 
-const PgmVersion string = "1.11.0"
+const PgmVersion string = "1.12.0"
 
 // Stats holds the computed statistical results.
 type Stats struct {
@@ -43,6 +43,9 @@ type Stats struct {
 	ZScoreThreshold   float64             // Z-score threshold used (0 = disabled)
 	Skewness          float64             // Formal skewness value
 	Kurtosis          float64             // Excess kurtosis
+	IsSymmetric       bool                // Dataset is a mirror image of itself about SymmetryCenter
+	SymmetryCenter    float64             // Center of reflection; valid only when IsSymmetric
+	SymmetryPairs     int                 // Number of mirrored pairs (excludes an odd-n center element)
 	CV                float64             // Coefficient of Variation as a percentage
 	HasNegativeData   bool                // Flag for negative value warning
 	CVValid           bool                // False when mean is near zero
@@ -395,6 +398,9 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 	// --- Kurtosis (excess kurtosis) ---
 	stats.Kurtosis = calculateKurtosis(data, stats.Mean, stats.StdDev)
 
+	// --- Symmetry ---
+	stats.IsSymmetric, stats.SymmetryCenter, stats.SymmetryPairs = detectSymmetry(sortedData)
+
 	// --- Check for negative data ---
 	for _, v := range data {
 		if v < 0 {
@@ -582,6 +588,27 @@ func calculateKurtosis(data []float64, mean, stdDev float64) float64 {
 	return (n*(n+1))/((n-1)*(n-2)*(n-3))*sumOfFourthDeviations - 3*(n-1)*(n-1)/((n-2)*(n-3))
 }
 
+// detectSymmetry reports whether sorted data is a mirror image of itself about a center value.
+// Symmetry is not evaluated for fewer than 3 values; center and pairs are meaningful only when symmetric is true.
+func detectSymmetry(sortedData []float64) (symmetric bool, center float64, pairs int) {
+	n := len(sortedData)
+	if n < 3 {
+		return false, 0, 0
+	}
+	// If the data is symmetric at all, it is symmetric about the midpoint of min and max.
+	c := (sortedData[0] + sortedData[n-1]) / 2
+	// Scale-relative tolerance for float64 representation error in the pair sums.
+	scale := math.Max(math.Abs(sortedData[0]), math.Abs(sortedData[n-1]))
+	tol := 1e-9 * math.Max(1.0, scale)
+	// The i <= n-1-i condition lets an odd-n middle element self-check against the center.
+	for i := 0; i <= n-1-i; i++ {
+		if math.Abs(sortedData[i]+sortedData[n-1-i]-2*c) > tol {
+			return false, 0, 0
+		}
+	}
+	return true, c, n / 2
+}
+
 // calculateEMA computes the final exponential moving average value for the given span.
 // EMA uses the multiplier α = 2/(span+1), starting from the first data point.
 func calculateEMA(data []float64, span int) float64 {
@@ -729,6 +756,23 @@ func printStats(s *Stats, labelWidth int) {
 	fmt.Printf("%s%s\n", padLabel("IQR:", labelWidth), formatFloat(s.IQR))
 	fmt.Printf("%s%s (%s)\n", padLabel("Skewness"+star+":", labelWidth), formatFloat(s.Skewness), interpretSkewness(s.Skewness))
 	fmt.Printf("%s%s (%s)\n", padLabel("Kurtosis"+star+":", labelWidth), formatFloat(s.Kurtosis), interpretKurtosis(s.Kurtosis))
+	symmetryStr := "N/A - requires at least 3 values"
+	if s.Count >= 3 {
+		if s.IsSymmetric {
+			pairWord := "pairs"
+			if s.SymmetryPairs == 1 {
+				pairWord = "pair"
+			}
+			symmetryStr = fmt.Sprintf("Symmetric about %s (%d %s", formatFloat(s.SymmetryCenter), s.SymmetryPairs, pairWord)
+			if s.Count%2 == 1 {
+				symmetryStr += " + center value"
+			}
+			symmetryStr += ")"
+		} else {
+			symmetryStr = "None"
+		}
+	}
+	fmt.Printf("%s%s\n", padLabel("Symmetry"+star+":", labelWidth), symmetryStr)
 	if len(s.Outliers) > 0 {
 		fmt.Printf("%s%s\n", padLabel("Outliers"+star+":", labelWidth), formatFloatSlice(s.Outliers))
 	} else {

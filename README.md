@@ -38,6 +38,7 @@ The calculator computes the following statistics:
 -   **EMA (Exponential Moving Average)**: A weighted moving average that gives more weight to recent values (`-e` flag). Unlike the simple mean, EMA is order-dependent and more responsive to new data, making it useful for detecting recent trends in time-series data.
 -   **Trim Dataset**: Sort and remove a percentage from each tail of the entire dataset before computing all statistics (`-T` flag). Unlike `-t` (which only adds a trimmed mean line), `-T` changes the entire output. Tail-sensitive statistics are marked with `*`.
 -   **Log Transform**: Optional natural log (ln) transform applied to all input data before computing statistics (`-l` flag). Useful for heavy-tailed data spanning several orders of magnitude (file sizes, latencies, income data). Requires all values to be positive.
+-   **Symmetry**: Detects whether the dataset is a mirror image of itself about a center value, by pairing the sorted data from both ends inward. Always computed; no flag required. This is a pairwise property that summary moments cannot capture — skewness of 0, a mean equal to the median, and equidistant min/max are consequences of symmetry, not evidence of it.
 
 All numeric output uses full decimal notation (no scientific notation) with trailing zeros trimmed for readability.
 
@@ -425,36 +426,72 @@ Running the command `./stats -z 2.0 sample_data.txt` will produce the following 
 
 ```
 --- Descriptive Statistics ---
-Count:          15
-Sum:            310.95
-Min:            13.99
-Max:            38.95
+Count:             15
+Sum:               310.95
+Min:               13.99
+Max:               38.95
 
 --- Measures of Central Tendency ---
-Mean:           20.73
-Median (p50):   18.92
-Mode:           15.05
+Mean:              20.73
+Median (p50):      18.92
+Mode:              15.05
 
 --- Measures of Spread & Distribution ---
-Std Deviation:    7.4605
-Variance:         55.6597
-CV:               35.9891% (High Variability)
-Quartile 1 (p25): 15.735
-Quartile 3 (p75): 21.765
-Percentile (p95): 36.801
-Percentile (p99): 38.5202
-IQR:              6.03
-Skewness:         1.6862 (Highly Right Skewed)
-Kurtosis:         2.2437 (Leptokurtic - peaked, heavy tails)
-Outliers:         [35.88 38.95]
-Z-Outliers (Z>2): [35.88 38.95]
+Std Deviation:     7.4605
+Variance:          55.6597
+CV:                35.9891% (High Variability)
+Quartile 1 (p25):  15.735
+Quartile 3 (p75):  21.765
+Percentile (p95):  36.801
+Percentile (p99):  38.5202
+IQR:               6.03
+Skewness:          1.6862 (Highly Right Skewed)
+Kurtosis:          2.2437 (Leptokurtic - peaked, heavy tails)
+Symmetry:          None
+Outliers:          [35.88 38.95]
+Z-Outliers (Z>2):  [35.88 38.95]
 
 --- Distribution ---
-Histogram:        █▄▂▆▂▂▂▁▁▁▁▁▁▁▂▂
-Trendline:        ▁▁▁▁▁▃▁▂▄▂█▃▁▇▂
+Histogram:         █▄▂▆▂▂▂▁▁▁▁▁▁▁▂▂
+Trendline:         ▁▂▁▁▂▃▁▂▄▃█▃▂▇▃
 ```
 
 The **Histogram** shows *distribution* — how values are spread across bins from sorted data. The **Trendline** shows *sequence* — how values trend over their original input order. Together they give a fuller picture of the dataset.
+
+The repository also includes `symmetric_data.txt`, a 40-value dataset whose sorted values pair up from both ends, each pair summing to 1000. Running `./stats symmetric_data.txt` produces:
+
+```
+--- Descriptive Statistics ---
+Count:             40
+Sum:               20000
+Min:               6
+Max:               994
+
+--- Measures of Central Tendency ---
+Mean:              500
+Median (p50):      500
+Mode:              None
+
+--- Measures of Spread & Distribution ---
+Std Deviation:     312.2309
+Variance:          97488.1538
+CV:                62.4462% (High Variability)
+Quartile 1 (p25):  229.75
+Quartile 3 (p75):  770.25
+Percentile (p95):  959.15
+Percentile (p99):  988.93
+IQR:               540.5
+Skewness:          0 (Fairly Symmetrical)
+Kurtosis:          -1.3157 (Platykurtic - flat, thin tails)
+Symmetry:          Symmetric about 500 (20 pairs)
+Outliers:          None
+
+--- Distribution ---
+Histogram:         █▄▆▄▆▂▆▄▄▆▂▆▄▆▄█
+Trendline:         ▅▆▃▆▄▆▃▄▄▄▅▄▆▃▅▃
+```
+
+Taken individually, the mean, median, and skewness here look unremarkable — plenty of asymmetric datasets produce the same values. The **Symmetry** line identifies the underlying structure directly: every value has a mirror partner across 500, a property the summary moments can only hint at.
 
 ## Understanding the Output
 
@@ -478,6 +515,7 @@ The **Histogram** shows *distribution* — how values are spread across bins fro
 | **Percentile (pN)** | Custom percentiles requested via the `-p` flag. The value below which N% of the data falls.                                                                              |
 | **IQR**           | The Interquartile Range (`Q3 - Q1`). It represents the middle 50% of the data and is a robust measure of spread.                                                           |
 | **Skewness**      | A measure of asymmetry. A value near 0 is symmetrical. A positive value indicates a "right skew" (a long tail of high values). A negative value indicates a "left skew".   |
+| **Symmetry**      | Reports whether the dataset is a mirror image of itself about a center value, checked by pairing the sorted values from both ends inward. When symmetry is found, the center and pair count are reported (e.g., `Symmetric about 500 (20 pairs)`); otherwise the line reads `None`. Requires at least 3 values. When `-T` is used, it is computed on the trimmed dataset and marked with `*`. |
 | **Kurtosis**      | Excess kurtosis measuring the "tailedness" of the distribution. Values < -1 are platykurtic (flat, thin tails), between -1 and 1 are mesokurtic (normal-like), and > 1 are leptokurtic (peaked, heavy tails). |
 | **Outliers**      | Values that fall outside the range of `Q1 - k*IQR` and `Q3 + k*IQR`, where `k` defaults to 1.5 and can be adjusted with the `-k` flag.                                      |
 | **Z-Score Outliers** | Values whose Z-score (number of standard deviations from the mean) exceeds the threshold set with the `-z` flag. Only shown when `-z` is provided. Ideal for normally distributed data. |
@@ -497,6 +535,7 @@ Standard Go unit tests cover the core statistical functions:
 - `computeStats` - verifies all computed statistics against a 31-number dataset
 - `calculatePercentile` - tests percentile interpolation at various points (p0, p25, p50, p75, p100)
 - `calculateSkewness` - validates skewness calculations for symmetric and skewed distributions
+- `detectSymmetry` - verifies mirror-symmetry detection across even and odd counts, duplicates, negative values, and float tolerance
 
 Run the tests with:
 ```bash
@@ -524,6 +563,8 @@ The test dataset consists of 31 numbers designed to exercise common scenarios:
 - A mix of integers, decimals, and numbers with trailing zeros (e.g., `25.00`, `35.0`)
 - Repeated values to produce a defined mode
 - An outlier value to verify outlier detection
+
+A second fixture of 40 values exercises symmetry detection: 20 disjoint pairs, each summing to 1000, symmetric about 500. All values are distinct and the input order is scrambled so the property is not visible positionally. It exists specifically to exercise a property the 31-value dataset does not have — the 31-value set is right-skewed and asymmetric, so it can only confirm that symmetry is *not* reported.
 
 The tests focus on typical usage patterns and do not cover exotic edge cases, extreme values, or adversarial inputs. Users requiring high-assurance results for critical applications should perform additional validation appropriate to their use case.
 

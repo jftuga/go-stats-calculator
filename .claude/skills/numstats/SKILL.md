@@ -44,6 +44,7 @@ printf '%s\n' 10 20 30 40 50 | stats
 - **Std Deviation, Variance, Coefficient of Variation**
 - **Q1, Q3, IQR, P95, P99** (plus custom percentiles via `-p`)
 - **Skewness** (symmetry) and **Kurtosis** (tailedness)
+- **Symmetry** (mirror-image detection about a center value; always computed, requires at least 3 values)
 - **Outliers** via IQR method (always) and Z-score method (when `-z` is set)
 - **Histogram** (sorted data distribution) and **Trendline** (input order) using Unicode blocks
 - **Trimmed Mean** (via `-t`), **EMA** (via `-e`)
