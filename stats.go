@@ -3,6 +3,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -20,7 +21,7 @@ const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
 
-const PgmVersion string = "1.13.0"
+const PgmVersion string = "1.14.0"
 
 // madScale is the normal-consistency constant that makes the MAD directly
 // comparable to the standard deviation for normally distributed data.
@@ -30,52 +31,81 @@ const madScale = 1.4826
 // approximately the reciprocal of madScale.
 const modZScale = 0.6745
 
+// ci95Z is the standard normal critical value for a two-sided 95% interval.
+const ci95Z = 1.96
+
+// baseDecimals is the number of decimal places used for values of magnitude 1
+// or greater. Smaller magnitudes gain additional places so that they keep
+// roughly the same number of significant digits instead of rounding to zero.
+const baseDecimals = 4
+
 // Stats holds the computed statistical results.
 type Stats struct {
-	Count             int
-	SkippedLines      int // Input lines that failed to parse (blank lines excluded)
-	Distinct          int // Number of distinct values
-	Sum               float64
-	Mean              float64
-	StdErr            float64 // Standard error of the mean (StdDev / sqrt(n))
-	GeometricMean     float64 // Geometric mean; valid only when GeoMeanValid
-	GeoMeanValid      bool    // False when any value is non-positive or under log transform
-	Median            float64
-	Mode              []float64 // A dataset can have more than one mode
-	Min               float64
-	Max               float64
-	StdDev            float64 // Standard Deviation
-	Variance          float64 // Variance = StdDev^2
-	MAD               float64 // Median absolute deviation, scaled by madScale
-	Q1                float64 // 1st Quartile (25th percentile)
-	Q3                float64 // 3rd Quartile (75th percentile)
-	P95               float64 // 95th percentile
-	P99               float64 // 99th percentile
-	IQR               float64 // Interquartile Range (Q3 - Q1)
-	Outliers          []float64
-	ZScoreOutliers    []float64           // Outliers detected via Z-score method
-	ZScoreThreshold   float64             // Z-score threshold used (0 = disabled)
-	ModZOutliers      []float64           // Outliers detected via modified z-score (Iglewicz-Hoaglin)
-	Skewness          float64             // Formal skewness value
-	Kurtosis          float64             // Excess kurtosis
-	IsSymmetric       bool                // Dataset is a mirror image of itself about SymmetryCenter
-	SymmetryCenter    float64             // Center of reflection; valid only when IsSymmetric
-	SymmetryPairs     int                 // Number of mirrored pairs (excludes an odd-n center element)
-	CV                float64             // Coefficient of Variation as a percentage
-	HasNegativeData   bool                // Flag for negative value warning
-	CVValid           bool                // False when mean is near zero
-	CustomPercentiles map[float64]float64 // User-requested percentiles
-	Histogram         string              // Unicode histogram showing distribution
-	Trendline         string              // Unicode trendline showing sequence pattern
-	Autocorrelation   float64             // Lag-1 autocorrelation in input order; valid only when AutocorrValid
-	AutocorrValid     bool                // False when n < 3, zero variance, or dataset trimmed (-T)
-	InputOrder        string              // ascending, descending, constant, or unordered; empty when suppressed
-	TrimmedMean       float64
-	TrimmedMeanPct    float64 // 0 = disabled
-	TrimDatasetPct    float64 // 0 = disabled; trim dataset before all stats
-	TrimDatasetOrigN  int     // original count before dataset trimming
-	EMA               float64
-	EMASpan           int // 0 = disabled
+	Count             int                 `json:"count"`
+	SkippedLines      int                 `json:"skippedLines"` // Input lines that failed to parse (blank lines excluded)
+	Distinct          int                 `json:"distinct"`     // Number of distinct values
+	Sum               float64             `json:"sum"`
+	Mean              float64             `json:"mean"`
+	StdErr            float64             `json:"stdErr"`        // Standard error of the mean (StdDev / sqrt(n))
+	CI95Lower         float64             `json:"ci95Lower"`     // Lower bound of the 95% confidence interval for the mean
+	CI95Upper         float64             `json:"ci95Upper"`     // Upper bound of the 95% confidence interval for the mean
+	CIValid           bool                `json:"ciValid"`       // False when n < 2 or the standard error is zero
+	GeometricMean     float64             `json:"geometricMean"` // Geometric mean; valid only when GeoMeanValid
+	GeoMeanValid      bool                `json:"geoMeanValid"`  // False when any value is non-positive or under log transform
+	Median            float64             `json:"median"`
+	Mode              []float64           `json:"mode"`          // A dataset can have more than one mode
+	ModalBinLow       float64             `json:"modalBinLow"`   // Lower edge of the densest histogram bin; valid only when ModalBinValid
+	ModalBinHigh      float64             `json:"modalBinHigh"`  // Upper edge of the densest histogram bin
+	ModalBinCount     int                 `json:"modalBinCount"` // Number of values in the densest bin
+	ModalBinValid     bool                `json:"modalBinValid"` // True only when no value repeats and the data has spread
+	Min               float64             `json:"min"`
+	Max               float64             `json:"max"`
+	StdDev            float64             `json:"stdDev"`   // Standard Deviation
+	Variance          float64             `json:"variance"` // Variance = StdDev^2
+	MAD               float64             `json:"mad"`      // Median absolute deviation, scaled by madScale
+	Q1                float64             `json:"q1"`       // 1st Quartile (25th percentile)
+	Q3                float64             `json:"q3"`       // 3rd Quartile (75th percentile)
+	P95               float64             `json:"p95"`      // 95th percentile
+	P99               float64             `json:"p99"`      // 99th percentile
+	IQR               float64             `json:"iqr"`      // Interquartile Range (Q3 - Q1)
+	IQRMultiplier     float64             `json:"iqrMultiplier"`
+	Outliers          []float64           `json:"outliers"`
+	ZScoreOutliers    []float64           `json:"zScoreOutliers"`  // Outliers detected via Z-score method; null when not computed
+	ZScoreThreshold   float64             `json:"zScoreThreshold"` // Z-score threshold used (0 = disabled)
+	ZScoreValid       bool                `json:"zScoreValid"`     // False when -z is given but the standard deviation is zero
+	ModZOutliers      []float64           `json:"modZOutliers"`    // Outliers via modified z-score (Iglewicz-Hoaglin); null when not computed
+	ModZValid         bool                `json:"modZValid"`       // False when -z is given but the MAD is zero
+	Skewness          float64             `json:"skewness"`        // Formal skewness value
+	Kurtosis          float64             `json:"kurtosis"`        // Excess kurtosis
+	IsSymmetric       bool                `json:"isSymmetric"`     // Dataset is a mirror image of itself about SymmetryCenter
+	SymmetryCenter    float64             `json:"symmetryCenter"`  // Center of reflection; valid only when IsSymmetric
+	SymmetryPairs     int                 `json:"symmetryPairs"`   // Number of mirrored pairs (excludes an odd-n center element)
+	CV                float64             `json:"cv"`              // Coefficient of Variation as a percentage
+	HasNegativeData   bool                `json:"hasNegativeData"` // Flag for negative value warning
+	CVValid           bool                `json:"cvValid"`         // False when mean is near zero
+	CustomPercentiles map[float64]float64 `json:"-"`               // User-requested percentiles; see statsOutput
+	Histogram         string              `json:"histogram"`       // Unicode histogram showing distribution
+	Trendline         string              `json:"trendline"`       // Unicode trendline showing sequence pattern
+	Autocorrelation   float64             `json:"autocorrelation"` // Lag-1 autocorrelation in input order; valid only when AutocorrValid
+	AutocorrValid     bool                `json:"autocorrValid"`   // False when n < 3, zero variance, or dataset trimmed (-T)
+	InputOrder        string              `json:"inputOrder"`      // ascending, descending, constant, or unordered; empty when suppressed
+	TrimmedMean       float64             `json:"trimmedMean"`
+	TrimmedMeanPct    float64             `json:"trimmedMeanPct"`   // 0 = disabled
+	TrimDatasetPct    float64             `json:"trimDatasetPct"`   // 0 = disabled; trim dataset before all stats
+	TrimDatasetOrigN  int                 `json:"trimDatasetOrigN"` // original count before dataset trimming
+	EMA               float64             `json:"ema"`
+	EMASpan           int                 `json:"emaSpan"` // 0 = disabled
+}
+
+// statsOutput is the JSON view of a Stats value. It embeds Stats so every field
+// is emitted without duplication, and adds the run metadata plus the string-keyed
+// percentile map that encoding/json requires.
+type statsOutput struct {
+	*Stats
+	Version           string             `json:"version"`
+	LogTransformed    bool               `json:"logTransformed"`
+	DuplicatePct      float64            `json:"duplicatePct"`
+	CustomPercentiles map[string]float64 `json:"customPercentiles,omitempty"`
 }
 
 func main() {
@@ -94,10 +124,22 @@ func main() {
 	trimPct := flag.Float64("t", 0, "trimmed mean percentage to remove from each tail (0-50)")
 	trimDatasetPct := flag.Float64("T", 0, "trim dataset: remove percentage from each tail before computing all statistics (0-50)")
 	emaSpan := flag.Int("e", 0, "EMA span (number of periods) for exponential moving average (>= 2)")
+	jsonOutput := flag.Bool("j", false, "emit results as JSON instead of formatted text")
 	flag.Parse()
+
+	// Handled before validation so the version is always reachable.
+	if *version {
+		fmt.Printf("%s version %s\n%s\n\n%s\n%s\n", PgmName, PgmVersion, PgmUrl, PgmDisclaimer, PgmSeeAlso)
+		os.Exit(0)
+	}
 
 	if *numBins < 5 || *numBins > 50 {
 		fmt.Fprintf(os.Stderr, "Error: number of bins must be between 5 and 50, got %d\n", *numBins)
+		os.Exit(1)
+	}
+
+	if *iqrMultiplier <= 0 {
+		fmt.Fprintf(os.Stderr, "Error: IQR multiplier must be greater than 0, got %v\n", *iqrMultiplier)
 		os.Exit(1)
 	}
 
@@ -131,11 +173,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *version {
-		fmt.Printf("%s version %s\n%s\n\n%s\n%s\n", PgmName, PgmVersion, PgmUrl, PgmDisclaimer, PgmSeeAlso)
-		os.Exit(0)
-	}
 	args := flag.Args()
+	// Go's flag package stops parsing at the first non-flag argument, so anything
+	// after the filename would otherwise be accepted and silently ignored.
+	if len(args) > 1 {
+		fmt.Fprintf(os.Stderr, "Error: expected at most one input file, got %d arguments: %s\n", len(args), strings.Join(args, " "))
+		fmt.Fprintf(os.Stderr, "Note: options must appear before the filename, e.g. %s -z 2.0 data.txt\n", PgmName)
+		os.Exit(1)
+	}
+
 	// Determine whether stdin is a terminal
 	inputIsTerminal := term.IsTerminal(int(os.Stdin.Fd()))
 
@@ -225,7 +271,15 @@ func main() {
 		stats.GeoMeanValid = false
 	}
 
-	labelWidth := 18 // len("Quartile 1 (p25):")
+	if *jsonOutput {
+		if err := printJSON(stats, *logTransform); err != nil {
+			fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	labelWidth := 18 // one more than len("Quartile 1 (p25):")
 	for _, p := range customPercentiles {
 		label := fmt.Sprintf("Percentile (p%s):", formatFloat(p))
 		if len(label) > labelWidth {
@@ -254,9 +308,6 @@ func main() {
 			labelWidth = len(label)
 		}
 	}
-	if *trimDatasetPct > 0 {
-		labelWidth++ // account for * suffix on labels
-	}
 	labelWidth++ // ensure padding via fmt.Sprintf, not the label+space fallback in padLabel
 	if *logTransform {
 		fmt.Println("(log-transformed, base e)")
@@ -269,9 +320,43 @@ func main() {
 	printStats(stats, labelWidth)
 }
 
+// printJSON writes the statistics to stdout as an indented JSON object.
+// Outlier lists follow a two-state convention: an empty array means the detector
+// ran and found nothing, while null means it never ran.
+func printJSON(s *Stats, logTransformed bool) error {
+	if s.Outliers == nil {
+		s.Outliers = []float64{}
+	}
+	if s.ZScoreValid && s.ZScoreOutliers == nil {
+		s.ZScoreOutliers = []float64{}
+	}
+	if s.ModZValid && s.ModZOutliers == nil {
+		s.ModZOutliers = []float64{}
+	}
+
+	out := statsOutput{
+		Stats:          s,
+		Version:        PgmVersion,
+		LogTransformed: logTransformed,
+		DuplicatePct:   float64(s.Count-s.Distinct) / float64(s.Count) * 100,
+	}
+	if len(s.CustomPercentiles) > 0 {
+		out.CustomPercentiles = make(map[string]float64, len(s.CustomPercentiles))
+		for k, v := range s.CustomPercentiles {
+			out.CustomPercentiles[formatFloat(k)] = v
+		}
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(out)
+}
+
 // readNumbers reads floating-point numbers (one per line) from an io.Reader.
 // It also returns the count of invalid lines that were skipped; blank lines
-// are skipped silently and do not count toward that total.
+// are skipped silently and do not count toward that total. NaN and infinities
+// parse successfully but are rejected, because a single one propagates through
+// every downstream statistic.
 func readNumbers(reader io.Reader) ([]float64, int, error) {
 	var numbers []float64
 	skipped := 0
@@ -285,7 +370,7 @@ func readNumbers(reader io.Reader) ([]float64, int, error) {
 		}
 
 		num, err := strconv.ParseFloat(line, 64)
-		if err != nil {
+		if err != nil || math.IsNaN(num) || math.IsInf(num, 0) {
 			// Log invalid lines but continue processing
 			fmt.Fprintf(
 				os.Stderr,
@@ -327,9 +412,10 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 
 	// --- Basic Stats ---
 	stats := &Stats{
-		Count: count,
-		Min:   sortedData[0],
-		Max:   sortedData[count-1],
+		Count:         count,
+		Min:           sortedData[0],
+		Max:           sortedData[count-1],
+		IQRMultiplier: iqrMultiplier,
 	}
 
 	// --- Mean ---
@@ -369,6 +455,13 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 
 	// --- Standard Error of the Mean ---
 	stats.StdErr = stats.StdDev / math.Sqrt(float64(count))
+
+	// --- 95% Confidence Interval for the Mean (normal approximation) ---
+	if count > 1 && stats.StdErr > 0 {
+		stats.CI95Lower = stats.Mean - ci95Z*stats.StdErr
+		stats.CI95Upper = stats.Mean + ci95Z*stats.StdErr
+		stats.CIValid = true
+	}
 
 	// --- Geometric Mean ---
 	if sortedData[0] > 0 {
@@ -420,6 +513,15 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 	// If the max frequency is 1, it means no number repeated, so there is no mode.
 	if maxFreq <= 1 {
 		stats.Mode = []float64{} // Return an empty slice
+		// Exact repeats are vanishingly rare in continuous measurements, so fall
+		// back to the densest histogram bin, which is what "most common" means there.
+		low, high, binCount, ok := findModalBin(sortedData, numBins)
+		if ok {
+			stats.ModalBinLow = low
+			stats.ModalBinHigh = high
+			stats.ModalBinCount = binCount
+			stats.ModalBinValid = true
+		}
 	} else {
 		stats.Mode = modes
 		sort.Float64s(stats.Mode) // For consistent output
@@ -436,28 +538,35 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 	}
 	sort.Float64s(stats.Outliers) // For consistent output
 
-	// --- Z-Score Outliers ---
-	if zScoreThreshold > 0 && stats.StdDev > 0 {
+	// --- Z-Score and Modified Z-Score Outliers ---
+	// The threshold is recorded whenever it was requested, so a degenerate
+	// dataset reports "N/A" rather than silently dropping the whole section.
+	if zScoreThreshold > 0 {
 		stats.ZScoreThreshold = zScoreThreshold
-		for _, v := range data {
-			z := math.Abs((v - stats.Mean) / stats.StdDev)
-			if z > zScoreThreshold {
-				stats.ZScoreOutliers = append(stats.ZScoreOutliers, v)
-			}
-		}
-		sort.Float64s(stats.ZScoreOutliers)
-	}
+		stats.ZScoreValid = stats.StdDev > 0
+		stats.ModZValid = stats.MAD > 0
 
-	// --- Modified Z-Score Outliers (Iglewicz-Hoaglin) ---
-	if stats.ZScoreThreshold > 0 && stats.MAD > 0 {
-		rawMAD := stats.MAD / madScale // unscaled median absolute deviation
-		for _, v := range data {
-			m := math.Abs(modZScale * (v - stats.Median) / rawMAD)
-			if m > zScoreThreshold {
-				stats.ModZOutliers = append(stats.ModZOutliers, v)
+		if stats.ZScoreValid {
+			for _, v := range data {
+				z := math.Abs((v - stats.Mean) / stats.StdDev)
+				if z > zScoreThreshold {
+					stats.ZScoreOutliers = append(stats.ZScoreOutliers, v)
+				}
 			}
+			sort.Float64s(stats.ZScoreOutliers)
 		}
-		sort.Float64s(stats.ModZOutliers)
+
+		// --- Modified Z-Score Outliers (Iglewicz-Hoaglin) ---
+		if stats.ModZValid {
+			rawMAD := stats.MAD / madScale // unscaled median absolute deviation
+			for _, v := range data {
+				m := math.Abs(modZScale * (v - stats.Median) / rawMAD)
+				if m > zScoreThreshold {
+					stats.ModZOutliers = append(stats.ModZOutliers, v)
+				}
+			}
+			sort.Float64s(stats.ModZOutliers)
+		}
 	}
 
 	// --- Skewness (formal calculation) ---
@@ -511,27 +620,42 @@ func computeStats(data []float64, customPercentiles []float64, iqrMultiplier flo
 	return stats, nil
 }
 
-// generateHistogram creates a Unicode histogram from sorted data.
-func generateHistogram(sortedData []float64, numBins int) string {
+// binData buckets sortedData into equal-width bins spanning [min, max] and returns
+// the bin counts, the minimum value, and the bin width. numBins is capped at the
+// number of values so bins can never outnumber observations. It returns a nil slice
+// when the data has fewer than two values or no spread, in which case binning is
+// meaningless.
+func binData(sortedData []float64, numBins int) ([]int, float64, float64) {
 	n := len(sortedData)
 	if n < 2 {
-		return ""
+		return nil, 0, 0
 	}
 	minVal := sortedData[0]
 	maxVal := sortedData[n-1]
 	if minVal == maxVal {
-		return ""
+		return nil, 0, 0
+	}
+	if numBins > n {
+		numBins = n
 	}
 
 	binWidth := (maxVal - minVal) / float64(numBins)
 	bins := make([]int, numBins)
-
 	for _, v := range sortedData {
 		idx := int((v - minVal) / binWidth)
 		if idx >= numBins {
 			idx = numBins - 1
 		}
 		bins[idx]++
+	}
+	return bins, minVal, binWidth
+}
+
+// generateHistogram creates a Unicode histogram from sorted data.
+func generateHistogram(sortedData []float64, numBins int) string {
+	bins, _, _ := binData(sortedData, numBins)
+	if bins == nil {
+		return ""
 	}
 
 	maxCount := 0
@@ -542,16 +666,40 @@ func generateHistogram(sortedData []float64, numBins int) string {
 	}
 
 	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
-	runes := make([]rune, numBins)
+	runes := make([]rune, len(bins))
 	for i, c := range bins {
 		if c == 0 {
 			runes[i] = blocks[0]
-		} else {
-			level := (c * 7) / maxCount
-			runes[i] = blocks[level]
+			continue
 		}
+		// Floor occupied bins one level above empty so a sparse bin is visually
+		// distinct from a bin holding nothing at all.
+		level := (c * 7) / maxCount
+		if level == 0 {
+			level = 1
+		}
+		runes[i] = blocks[level]
 	}
 	return string(runes)
+}
+
+// findModalBin returns the edges and count of the densest histogram bin. It is used
+// in place of the mode for continuous data, where exact repeats almost never occur.
+// The ok result is false when the data cannot be binned.
+func findModalBin(sortedData []float64, numBins int) (low float64, high float64, count int, ok bool) {
+	bins, minVal, binWidth := binData(sortedData, numBins)
+	if bins == nil {
+		return 0, 0, 0, false
+	}
+	best := 0
+	for i, c := range bins {
+		if c > bins[best] {
+			best = i
+		}
+	}
+	low = minVal + float64(best)*binWidth
+	high = low + binWidth
+	return low, high, bins[best], true
 }
 
 // generateTrendline creates a Unicode trendline from data in its original input order.
@@ -809,12 +957,26 @@ func interpretCV(cv float64) string {
 	return "High Variability"
 }
 
-// formatFloat formats a float64 without scientific notation, trimming unnecessary trailing zeros.
+// decimalsFor reports how many decimal places formatFloat should use for a value.
+// Magnitudes of 1 or greater use baseDecimals; smaller magnitudes gain one place per
+// leading zero so that a value like 0.00004 keeps its significant digits instead of
+// rounding away to 0.
+func decimalsFor(v float64) int {
+	abs := math.Abs(v)
+	if abs == 0 || abs >= 1 || math.IsNaN(abs) || math.IsInf(abs, 0) {
+		return baseDecimals
+	}
+	return baseDecimals - int(math.Floor(math.Log10(abs))) - 1
+}
+
+// formatFloat formats a float64 without scientific notation, trimming unnecessary
+// trailing zeros. The decimal width adapts to the magnitude of the value, so small
+// numbers survive formatting rather than collapsing to 0.
 func formatFloat(v float64) string {
 	if v == math.Trunc(v) {
 		return strconv.FormatFloat(v, 'f', 0, 64)
 	}
-	s := strconv.FormatFloat(v, 'f', 4, 64)
+	s := strconv.FormatFloat(v, 'f', decimalsFor(v), 64)
 	s = strings.TrimRight(s, "0")
 	s = strings.TrimSuffix(s, ".")
 	return s
@@ -859,12 +1021,28 @@ func padLabel(label string, labelWidth int) string {
 	return padded
 }
 
+// formatMode renders the mode line value, falling back to the densest histogram bin
+// when no value repeats.
+func formatMode(s *Stats) string {
+	switch {
+	case len(s.Mode) == 1:
+		return formatFloat(s.Mode[0])
+	case len(s.Mode) > 1:
+		return formatFloatSlice(s.Mode)
+	case s.ModalBinValid:
+		valueWord := "values"
+		if s.ModalBinCount == 1 {
+			valueWord = "value"
+		}
+		return fmt.Sprintf("None (modal bin: %s-%s, %d %s)",
+			formatFloat(s.ModalBinLow), formatFloat(s.ModalBinHigh), s.ModalBinCount, valueWord)
+	default:
+		return "None"
+	}
+}
+
 // printStats displays the results in a readable format.
 func printStats(s *Stats, labelWidth int) {
-	star := ""
-	if s.TrimDatasetPct > 0 {
-		star = "*"
-	}
 	fmt.Println("--- Descriptive Statistics ---")
 	fmt.Printf("%s%d\n", padLabel("Count:", labelWidth), s.Count)
 	if s.SkippedLines > 0 {
@@ -882,6 +1060,10 @@ func printStats(s *Stats, labelWidth int) {
 	fmt.Println("\n--- Measures of Central Tendency ---")
 	fmt.Printf("%s%s\n", padLabel("Mean:", labelWidth), formatFloat(s.Mean))
 	fmt.Printf("%s%s\n", padLabel("Std Error:", labelWidth), formatFloat(s.StdErr))
+	if s.CIValid {
+		ci := fmt.Sprintf("[%s, %s]", formatFloat(s.CI95Lower), formatFloat(s.CI95Upper))
+		fmt.Printf("%s%s\n", padLabel("95% CI (mean):", labelWidth), ci)
+	}
 	if s.GeoMeanValid {
 		fmt.Printf("%s%s\n", padLabel("Geometric Mean:", labelWidth), formatFloat(s.GeometricMean))
 	}
@@ -895,21 +1077,16 @@ func printStats(s *Stats, labelWidth int) {
 	}
 	fmt.Printf("%s%s\n", padLabel("Median (p50):", labelWidth), formatFloat(s.Median))
 
-	switch len(s.Mode) {
-	case 0:
-		fmt.Printf("%s%s\n", padLabel("Mode:", labelWidth), "None")
-	case 1:
-		// If there's only one mode, print it as a clean number.
-		fmt.Printf("%s%s\n", padLabel("Mode:", labelWidth), formatFloat(s.Mode[0]))
-	default:
-		// If there are multiple modes, label it and print the slice.
-		fmt.Printf("%s%s\n", padLabel("Mode (multi):", labelWidth), formatFloatSlice(s.Mode))
+	modeLabel := "Mode:"
+	if len(s.Mode) > 1 {
+		modeLabel = "Mode (multi):"
 	}
+	fmt.Printf("%s%s\n", padLabel(modeLabel, labelWidth), formatMode(s))
 
 	fmt.Println("\n--- Measures of Spread & Distribution ---")
 	fmt.Printf("%s%s\n", padLabel("Std Deviation:", labelWidth), formatFloat(s.StdDev))
 	fmt.Printf("%s%s\n", padLabel("Variance:", labelWidth), formatFloat(s.Variance))
-	fmt.Printf("%s%s\n", padLabel("MAD"+star+":", labelWidth), formatFloat(s.MAD))
+	fmt.Printf("%s%s\n", padLabel("MAD:", labelWidth), formatFloat(s.MAD))
 	if !s.CVValid {
 		fmt.Printf("%s%s\n", padLabel("CV:", labelWidth), "N/A - mean near zero")
 	} else {
@@ -931,12 +1108,12 @@ func printStats(s *Stats, labelWidth int) {
 	}
 	sort.Float64s(pctKeys)
 	for _, k := range pctKeys {
-		label := fmt.Sprintf("Percentile (p%s)%s:", formatFloat(k), star)
+		label := fmt.Sprintf("Percentile (p%s):", formatFloat(k))
 		fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloat(allPercentiles[k]))
 	}
 	fmt.Printf("%s%s\n", padLabel("IQR:", labelWidth), formatFloat(s.IQR))
-	fmt.Printf("%s%s (%s)\n", padLabel("Skewness"+star+":", labelWidth), formatFloat(s.Skewness), interpretSkewness(s.Skewness))
-	fmt.Printf("%s%s (%s)\n", padLabel("Kurtosis"+star+":", labelWidth), formatFloat(s.Kurtosis), interpretKurtosis(s.Kurtosis))
+	fmt.Printf("%s%s (%s)\n", padLabel("Skewness:", labelWidth), formatFloat(s.Skewness), interpretSkewness(s.Skewness))
+	fmt.Printf("%s%s (%s)\n", padLabel("Kurtosis:", labelWidth), formatFloat(s.Kurtosis), interpretKurtosis(s.Kurtosis))
 	symmetryStr := "N/A - requires at least 3 values"
 	if s.Count >= 3 {
 		if s.IsSymmetric {
@@ -953,25 +1130,29 @@ func printStats(s *Stats, labelWidth int) {
 			symmetryStr = "None"
 		}
 	}
-	fmt.Printf("%s%s\n", padLabel("Symmetry"+star+":", labelWidth), symmetryStr)
+	fmt.Printf("%s%s\n", padLabel("Symmetry:", labelWidth), symmetryStr)
 	if len(s.Outliers) > 0 {
-		fmt.Printf("%s%s\n", padLabel("Outliers"+star+":", labelWidth), formatFloatSlice(s.Outliers))
+		fmt.Printf("%s%s\n", padLabel("Outliers:", labelWidth), formatFloatSlice(s.Outliers))
 	} else {
-		fmt.Printf("%s%s\n", padLabel("Outliers"+star+":", labelWidth), "None")
+		fmt.Printf("%s%s\n", padLabel("Outliers:", labelWidth), "None")
 	}
 	if s.ZScoreThreshold > 0 {
-		label := fmt.Sprintf("Z-Outliers (Z>%s)%s:", formatFloat(s.ZScoreThreshold), star)
-		if len(s.ZScoreOutliers) > 0 {
+		label := fmt.Sprintf("Z-Outliers (Z>%s):", formatFloat(s.ZScoreThreshold))
+		switch {
+		case !s.ZScoreValid:
+			fmt.Printf("%s%s\n", padLabel(label, labelWidth), "N/A - standard deviation is zero")
+		case len(s.ZScoreOutliers) > 0:
 			fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloatSlice(s.ZScoreOutliers))
-		} else {
+		default:
 			fmt.Printf("%s%s\n", padLabel(label, labelWidth), "None")
 		}
-		label = fmt.Sprintf("Mod Z-Outliers (Z>%s)%s:", formatFloat(s.ZScoreThreshold), star)
-		if s.MAD == 0 {
+		label = fmt.Sprintf("Mod Z-Outliers (Z>%s):", formatFloat(s.ZScoreThreshold))
+		switch {
+		case !s.ModZValid:
 			fmt.Printf("%s%s\n", padLabel(label, labelWidth), "N/A - MAD is zero")
-		} else if len(s.ModZOutliers) > 0 {
+		case len(s.ModZOutliers) > 0:
 			fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloatSlice(s.ModZOutliers))
-		} else {
+		default:
 			fmt.Printf("%s%s\n", padLabel(label, labelWidth), "None")
 		}
 	}
@@ -989,12 +1170,17 @@ func printStats(s *Stats, labelWidth int) {
 		if s.InputOrder != "" {
 			orderStr := s.InputOrder
 			if s.InputOrder == "ascending" || s.InputOrder == "descending" {
-				orderStr += " WARNING: trendline and autocorrelation reflect this sort order, not a property of the data"
+				// EMA is order-dependent too, so name it whenever it is on display.
+				affected := "trendline and autocorrelation"
+				if s.EMASpan > 0 {
+					affected = "trendline, autocorrelation, and EMA"
+				}
+				orderStr += " WARNING: " + affected + " reflect this sort order, not a property of the data"
 			}
 			fmt.Printf("%s%s\n", padLabel("Input Order:", labelWidth), orderStr)
 		}
 	}
 	if s.TrimDatasetPct > 0 {
-		fmt.Println("\n* computed on trimmed dataset; tail-sensitive statistics may differ from full data")
+		fmt.Println("\n* all statistics above are computed on the trimmed dataset; compare against the full-data output")
 	}
 }

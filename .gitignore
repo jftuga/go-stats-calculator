@@ -30,3 +30,10 @@ go.work.sum
 # Editor/IDE
 .idea/
 # .vscode/
+
+# Compiled binary produced by `make` or `go build -o stats`
+/stats
+
+# Python bytecode from verify_stats.py
+__pycache__/
+*.pyc
