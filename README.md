@@ -6,7 +6,7 @@ A robust, command-line tool written in Go to compute a comprehensive set of desc
 
 ## Overview
 
-This program takes a simple, newline-delimited list of numbers (integers or floats) and calculates key statistical properties, including measures of central tendency (mean, median, mode), measures of spread (standard deviation, variance, IQR), the shape of the distribution (skewness), plus robust measures (MAD, geometric mean) and sequence properties (autocorrelation, input order). It also identifies outliers based on the interquartile range method.
+This program takes a simple, newline-delimited list of numbers (integers or floats) and calculates key statistical properties, including measures of central tendency (mean, median, mode), measures of spread (standard deviation, variance, IQR), the shape of the distribution (skewness, kurtosis, symmetry), plus robust measures (MAD, geometric mean, trimmed mean) and sequence properties (autocorrelation, input order). It also identifies outliers using three independent methods, and can emit everything as JSON for scripting.
 
 ## Disclaimer
 
@@ -17,10 +17,12 @@ This program was vibe-coded by `Gemini 2.5` Pro and `Opus 4.5`. As such, the aut
 The calculator computes the following statistics:
 
 -   **Count**: Total number of valid data points.
+-   **Sum**: The total of all values.
 -   **Min / Max**: The minimum and maximum values in the dataset.
 -   **Mean**: The arithmetic average.
+-   **95% Confidence Interval**: The range that plausibly contains the true population mean, computed as `mean ± 1.96 × standard error`.
 -   **Median (p50)**: The 50th percentile, or the middle value of the dataset.
--   **Mode**: The value(s) that appear most frequently.
+-   **Mode**: The value(s) that appear most frequently. When no value repeats, the densest histogram bin is reported instead (see [A note on Mode](#a-note-on-mode)).
 -   **Standard Deviation**: A measure of the amount of variation or dispersion.
 -   **Variance**: The square of the standard deviation.
 -   **Quartiles (Q1, Q3)**: The 25th (p25) and 75th (p75) percentiles.
@@ -36,7 +38,7 @@ The calculator computes the following statistics:
 -   **Trendline**: A single-line Unicode trendline showing the sequence pattern of values in their original input order, using configurable bins (`-b` flag).
 -   **Trimmed Mean**: A robust measure of central tendency that removes a configurable percentage from each tail (`-t` flag). Less sensitive to outliers than the regular mean while using more data than the median.
 -   **EMA (Exponential Moving Average)**: A weighted moving average that gives more weight to recent values (`-e` flag). Unlike the simple mean, EMA is order-dependent and more responsive to new data, making it useful for detecting recent trends in time-series data.
--   **Trim Dataset**: Sort and remove a percentage from each tail of the entire dataset before computing all statistics (`-T` flag). Unlike `-t` (which only adds a trimmed mean line), `-T` changes the entire output. Tail-sensitive statistics are marked with `*`.
+-   **Trim Dataset**: Sort and remove a percentage from each tail of the entire dataset before computing all statistics (`-T` flag). Unlike `-t` (which only adds a trimmed mean line), `-T` changes the entire output — every statistic, Min and Max included, is computed on the reduced dataset.
 -   **Log Transform**: Optional natural log (ln) transform applied to all input data before computing statistics (`-l` flag). Useful for heavy-tailed data spanning several orders of magnitude (file sizes, latencies, income data). Requires all values to be positive.
 -   **Symmetry**: Detects whether the dataset is a mirror image of itself about a center value, by pairing the sorted data from both ends inward. Always computed; no flag required. This is a pairwise property that summary moments cannot capture — skewness of 0, a mean equal to the median, and equidistant min/max are consequences of symmetry, not evidence of it.
 -   **Skipped Lines**: Reports how many input lines failed to parse, so malformed input cannot silently vanish from the analysis. Only shown when the count is greater than zero; blank lines are skipped silently and never counted.
@@ -45,8 +47,20 @@ The calculator computes the following statistics:
 -   **Standard Error**: The standard error of the mean (`stddev / sqrt(n)`), which tells you how much to trust the reported mean.
 -   **Geometric Mean**: The correct average for ratios, growth rates, index values, and normalized measurements. Shown only when all values are positive; suppressed under `-l` because the arithmetic mean of log-transformed values already is the log of the geometric mean.
 -   **Autocorrelation and Input Order**: Lag-1 autocorrelation measures whether each value predicts the next, and the input-order line reports whether data arrived ascending, descending, constant, or unordered. Besides the trendline and EMA, these are the only statistics in the program sensitive to input order. Both are suppressed under `-T`.
+-   **JSON Output**: Emit every computed value as a single JSON object with the `-j` flag, for piping into `jq` or any other tool.
 
-All numeric output uses full decimal notation (no scientific notation) with trailing zeros trimmed for readability.
+All numeric output uses full decimal notation (no scientific notation) with trailing zeros trimmed for readability. The number of decimal places adapts to the magnitude of each value, so small numbers keep their significant digits rather than rounding away to `0`:
+
+```
+# 0.00004 and 0.00006 are reported as themselves, not as 0
+Min:               0.00004
+Max:               0.00006
+Mean:              0.00005
+```
+
+**Note on variance:** this program computes the **sample** variance and standard deviation (dividing by `n - 1`, Bessel's correction), which is the right choice when your numbers are a sample drawn from some larger population. If your input is an entire population rather than a sample, the reported variance and standard deviation are slightly too large, and every statistic derived from them — standard error, the confidence interval, CV, and Z-score outliers — inherits that bias. There is no flag to switch to the population form; multiply the variance by `(n-1)/n` if you need it.
+
+**Note on percentiles:** all percentiles, quartiles, and the median use linear interpolation between order statistics (`rank = p × (n - 1)`), the method known as R-7 and the default in NumPy, R, and Excel's `PERCENTILE.INC`. Other tools disagree: Excel's `PERCENTILE.EXC`, most SQL engines, and Prometheus use different definitions, so a p95 cross-checked against those will differ slightly on the same data without either being wrong.
 
 ## Installation
 
@@ -60,7 +74,7 @@ All numeric output uses full decimal notation (no scientific notation) with trai
     ```bash
     git clone https://github.com/jftuga/go-stats-calculator.git
     cd go-stats-calculator
-    go build -ldflags="-s -w" -o stats stats.go
+    go build -ldflags="-s -w" -o stats .
     ```
 
 ## Claude Code Skill
@@ -320,9 +334,11 @@ Use the `-T` flag to sort the input data, remove a percentage from each tail, an
 
 When `-T` is active:
 - A header line shows the trim percentage and the before/after counts (e.g., `31 → 25 values`).
-- Tail-sensitive statistics (percentiles, MAD, skewness, kurtosis, outliers, Z-outliers, Mod Z-outliers) are marked with `*`.
+- **Every** statistic is computed on the reduced dataset, including Min, Max, Mean, and standard deviation.
 - The Trendline, Autocorrelation, and Input Order lines are suppressed (input order is lost after sorting, so they would describe the sort, not the data).
-- A footnote explains the `*` markers.
+- A footnote repeats that all values come from the trimmed data.
+
+Earlier versions marked a subset of "tail-sensitive" statistics with `*`. That convention was removed: it implied the unmarked statistics were unaffected, which was never true — trimming changes the mean, standard deviation, and Min/Max as much as it changes the percentiles.
 
 The `-T` flag is mutually exclusive with both `-t` and `-e`.
 
@@ -348,7 +364,7 @@ The `-T` flag is mutually exclusive with both `-t` and `-e`.
 | Flag | What it does | Output effect |
 | :--- | :----------- | :------------ |
 | `-t 10` | Computes a trimmed mean and adds one line to the output | All other statistics use the full dataset |
-| `-T 10` | Removes 10% from each tail, then computes everything | All statistics use the reduced dataset; `*` markers on tail-sensitive stats |
+| `-T 10` | Removes 10% from each tail, then computes everything | All statistics use the reduced dataset, Min and Max included |
 
 ### 10. Log Transform
 
@@ -407,6 +423,52 @@ python3 -c "import math; print(math.exp(3.4))"
 
 The log-space standard deviation has a useful interpretation: it approximates the "multiplicative spread" of the data. A log-space stddev of `1.0` means the typical value is within a factor of *e* (~2.7×) of the mean.
 
+### 11. JSON Output
+
+Use the `-j` flag to emit every computed value as a single JSON object instead of formatted text. This is the recommended way to consume the program from a script: the text output is padded for human reading and its alignment is not a stable interface, while the JSON field names are.
+
+**Syntax:**
+```bash
+./stats -j <filename>
+```
+
+**Examples:**
+```bash
+# Pretty-printed JSON on stdout
+./stats -j data.txt
+
+# Extract a single value
+./stats -j data.txt | jq -r '.p95'
+
+# Combine with any other flag
+./stats -j -z 2.0 -p "10,90" data.txt | jq '{mean, p95, outliers, zScoreOutliers}'
+
+# Fail a build when a latency budget is exceeded
+[[ $(./stats -j latency.txt | jq '.p99 < 250') == "true" ]] || exit 1
+```
+
+Warnings about skipped lines still go to stderr, so stdout is always valid JSON on a successful run.
+
+**Field conventions:**
+
+| Convention | Meaning |
+| :--------- | :------ |
+| `outliers` | Always an array. Empty means the detector ran and found nothing. |
+| `zScoreOutliers`, `modZOutliers` | An array when `-z` was used, `null` when it was not. |
+| `zScoreValid`, `modZValid` | `false` when `-z` was requested but the standard deviation or MAD is zero, making the score undefined. |
+| `geoMeanValid`, `cvValid`, `ciValid`, `autocorrValid`, `modalBinValid`, `isSymmetric` | Guard flags. When one is `false`, the value it guards is `0` and carries no meaning. |
+| `inputOrder`, `trendline` | Empty strings under `-T`, where sorting destroyed the input order. |
+| `customPercentiles` | Present only when `-p` was used; keys are the requested percentiles as strings. |
+
+### 12. Version
+
+Use the `-v` flag to print the program version, project URL, and disclaimer, then exit. It is handled before any other flag is validated, so it always works.
+
+**Syntax:**
+```bash
+./stats -v
+```
+
 ## Example
 
 Given a file named `sample_data.txt` with the following content:
@@ -443,6 +505,7 @@ Max:                  38.95
 --- Measures of Central Tendency ---
 Mean:                 20.73
 Std Error:            1.9263
+95% CI (mean):        [16.9544, 24.5056]
 Geometric Mean:       19.7402
 Median (p50):         18.92
 Mode:                 15.05
@@ -465,9 +528,9 @@ Z-Outliers (Z>2):     [35.88 38.95]
 Mod Z-Outliers (Z>2): [35.88 38.95]
 
 --- Distribution ---
-Histogram:            █▄▂▆▂▂▂▁▁▁▁▁▁▁▂▂
+Histogram:            █▄▄▄▄▁▂▁▁▁▁▁▁▂▂
 Trendline:            ▁▂▁▁▂▃▁▂▄▃█▃▂▇▃
-Autocorrelation:      0.0322 (no serial dependence)
+Autocorrelation:      0.03217 (no serial dependence)
 Input Order:          unordered
 ```
 
@@ -486,9 +549,10 @@ Max:               994
 --- Measures of Central Tendency ---
 Mean:              500
 Std Error:         49.368
+95% CI (mean):     [403.2386, 596.7614]
 Geometric Mean:    342.0333
 Median (p50):      500
-Mode:              None
+Mode:              None (modal bin: 6-67.75, 4 values)
 
 --- Measures of Spread & Distribution ---
 Std Deviation:     312.2309
@@ -524,25 +588,43 @@ Mod Z-Outliers (Z>2.5): [50 52]
 
 The classic z-score misses both outliers because they inflate the mean and standard deviation used to score them — two extremes on the same tail suppress each other's z-scores, a failure mode called masking. The modified z-score is built from the median and MAD, which the outliers cannot inflate, so both are caught at the same threshold. When the two lines disagree like this, trust the modified z-scores.
 
+### A note on Mode
+
+The mode counts values that are **exactly** equal, bit for bit. That is the right definition for discrete data — HTTP status codes, dice rolls, ratings, counts — where repeats are meaningful. It is close to useless for continuous measurements: two independently measured latencies or file sizes will essentially never be equal to the last decimal place, so the mode of a continuous dataset is almost always `None`.
+
+When no value repeats, the program falls back to the **modal bin**: the densest bin of the same histogram shown lower in the output, reported with its range and count.
+
+```
+# Discrete data with real repeats
+Mode:              15.05
+
+# Continuous data with no exact repeats
+Mode:              None (modal bin: 6-67.75, 4 values)
+```
+
+The bin width depends on the `-b` flag, so the modal bin is a property of the chosen binning as much as of the data. Treat it as a hint about where values cluster, not as a precise statistic. When the data is close to uniform, the "densest" bin wins by a margin of one or two observations and means very little — check the histogram before reading anything into it.
+
 ## Understanding the Output
 
 | Statistic         | Description                                                                                                                                                                |
 | :---------------- |:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Count**         | The total number of valid numeric entries processed.                                                                                                                       |
+| **Sum**           | The total of all valid values.                                                                                                                                             |
 | **Skipped**       | The number of input lines that failed to parse. Only shown when greater than zero. Blank lines are skipped silently and never counted.                                     |
 | **Distinct**      | The number of distinct values and the percentage of the dataset that is duplicated (e.g., `28 of 31 (9.6774% duplicated)`).                                                |
 | **Min**           | The smallest number in the dataset.                                                                                                                                        |
 | **Max**           | The largest number in the dataset.                                                                                                                                         |
 | **Mean**          | The "average" value. Highly sensitive to outliers.                                                                                                                         |
 | **Std Error**     | The standard error of the mean (`stddev / sqrt(n)`). Smaller values mean the reported mean is a more reliable estimate.                                                    |
+| **95% CI (mean)** | The 95% confidence interval for the mean, computed as `mean ± 1.96 × Std Error`. Roughly: if you resampled repeatedly, about 95% of such intervals would contain the true population mean. This is the normal approximation; for small samples (n < 30) the true interval is somewhat wider, because it should use a t-distribution critical value rather than 1.96. Suppressed when n < 2 or the standard error is zero. |
 | **Geometric Mean** | The n-th root of the product of all values, computed as `exp(mean(ln x))`. The correct average for ratios, growth rates, and index values. Only shown when all values are positive; suppressed under `-l`. |
 | **Trimmed Mean**  | The mean after removing a percentage of values from each tail of the sorted dataset. Only shown when `-t` is used. More robust than the mean against outliers while using more of the data than the median. |
 | **EMA** | The exponential moving average for the given span. Only shown when `-e` is used. Unlike the simple mean, EMA is order-dependent and weights recent values more heavily. |
 | **Median (p50)**  | The middle value of the sorted dataset. Represents the "typical" value and is robust against outliers.                                                                     |
-| **Mode**          | The number(s) that occur most frequently. If no number repeats, the mode is "None".                                                                                        |
+| **Mode**          | The number(s) that occur most frequently. If no number repeats, the line reads `None` followed by the densest histogram bin and its count, e.g. `None (modal bin: 6-67.75, 4 values)`. See [A note on Mode](#a-note-on-mode). |
 | **Std Deviation** | Measures how spread out the numbers are from the mean. A low value indicates data is clustered tightly; a high value indicates data is spread out.                         |
 | **Variance**      | The square of the standard deviation.                                                                                                                                      |
-| **MAD**           | The median absolute deviation (median of `abs(x - median)`), scaled by 1.4826 so it is directly comparable to the standard deviation for normal data. A robust measure of spread that outliers cannot inflate. Marked with `*` under `-T`. |
+| **MAD**           | The median absolute deviation (median of `abs(x - median)`), scaled by 1.4826 so it is directly comparable to the standard deviation for normal data. A robust measure of spread that outliers cannot inflate. |
 | **CV**            | The ratio of the standard deviation to the mean, expressed as a percentage. CV < 15% indicates low variability, 15–30% moderate variability, and ≥ 30% high variability. Shows "N/A" when the mean is near zero, and displays a warning if the dataset contains negative values. |
 | **Quartile 1 (p25)** | The value below which 25% of the data falls.                                                                                                                            |
 | **Quartile 3 (p75)** | The value below which 75% of the data falls.                                                                                                                            |
@@ -551,49 +633,59 @@ The classic z-score misses both outliers because they inflate the mean and stand
 | **Percentile (pN)** | Custom percentiles requested via the `-p` flag. The value below which N% of the data falls.                                                                              |
 | **IQR**           | The Interquartile Range (`Q3 - Q1`). It represents the middle 50% of the data and is a robust measure of spread.                                                           |
 | **Skewness**      | A measure of asymmetry. A value near 0 is symmetrical. A positive value indicates a "right skew" (a long tail of high values). A negative value indicates a "left skew".   |
-| **Symmetry**      | Reports whether the dataset is a mirror image of itself about a center value, checked by pairing the sorted values from both ends inward. When symmetry is found, the center and pair count are reported (e.g., `Symmetric about 500 (20 pairs)`); otherwise the line reads `None`. Requires at least 3 values. When `-T` is used, it is computed on the trimmed dataset and marked with `*`. |
+| **Symmetry**      | Reports whether the dataset is a mirror image of itself about a center value, checked by pairing the sorted values from both ends inward. When symmetry is found, the center and pair count are reported (e.g., `Symmetric about 500 (20 pairs)`); otherwise the line reads `None`. Requires at least 3 values. |
 | **Kurtosis**      | Excess kurtosis measuring the "tailedness" of the distribution. Values < -1 are platykurtic (flat, thin tails), between -1 and 1 are mesokurtic (normal-like), and > 1 are leptokurtic (peaked, heavy tails). |
 | **Outliers**      | Values that fall outside the range of `Q1 - k*IQR` and `Q3 + k*IQR`, where `k` defaults to 1.5 and can be adjusted with the `-k` flag.                                      |
-| **Z-Score Outliers** | Values whose Z-score (number of standard deviations from the mean) exceeds the threshold set with the `-z` flag. Only shown when `-z` is provided. Ideal for normally distributed data. |
+| **Z-Score Outliers** | Values whose Z-score (number of standard deviations from the mean) exceeds the threshold set with the `-z` flag. Only shown when `-z` is provided. Ideal for normally distributed data. Reads `N/A - standard deviation is zero` when every value is identical. |
 | **Mod Z-Outliers** | Values whose modified z-score (Iglewicz-Hoaglin: `0.6745 * (x - median) / MAD`) exceeds the same `-z` threshold. Robust against masking, where outliers inflate the mean and standard deviation enough to hide themselves from classic z-scores. Reads `N/A - MAD is zero` when more than half the values are identical. Only shown when `-z` is provided. |
 | **Histogram**     | A single-line Unicode histogram showing data distribution across bins. Each character represents a bin, with taller blocks indicating more values. Bin count is configurable with the `-b` flag (default 16). |
 | **Trendline**     | A single-line Unicode trendline showing the sequence pattern of values in their original input order. Data is divided into equal chunks, each averaged and mapped to a block character. Bin count is configurable with the `-b` flag (default 16). |
 | **Autocorrelation** | The lag-1 autocorrelation of the data in its original input order, measuring whether each value predicts the next. Values near 0 indicate no serial dependence; values near 1 or -1 indicate strong dependence. Cleared under `-T` because sorting destroys input order. |
 | **Input Order**   | Whether the data arrived `ascending`, `descending`, `constant`, or `unordered` (non-strict; ties allowed). When the input is sorted, a warning notes that the trendline and autocorrelation reflect the sort rather than any property of the data. Cleared under `-T`. |
-| **Trim Dataset** | When the `-T` flag is used, a `(trimmed dataset: ...)` header appears above the output showing the trim percentage and before/after counts. All statistics are computed on the reduced dataset. Tail-sensitive statistics (percentiles, MAD, skewness, kurtosis, outliers) are marked with `*`. The Trendline, Autocorrelation, and Input Order lines are suppressed. Mutually exclusive with `-t` and `-e`. |
+| **Trim Dataset** | When the `-T` flag is used, a `(trimmed dataset: ...)` header appears above the output showing the trim percentage and before/after counts. Every statistic is computed on the reduced dataset, Min and Max included. The Trendline, Autocorrelation, and Input Order lines are suppressed. Mutually exclusive with `-t` and `-e`. |
 | **Log Transform** | When the `-l` flag is used, a `(log-transformed, base e)` header appears above the output. All statistics are computed on `ln(x)` values. To convert back to original units, exponentiate (e.g., `e^mean`). Requires all input values to be positive. |
+| **Input Order warning** | When the input arrived already sorted, the Input Order line warns that the trendline and autocorrelation describe the sort rather than the data. The warning also names the EMA whenever `-e` is active, since the EMA of sorted data converges on the last value regardless of the data's actual behavior. |
 
 ## Testing and Correctness
 
-The program includes two layers of verification:
+The program has three independent verification layers, and all three run in CI on every push and pull request (`.github/workflows/build.yml`). A release is blocked unless they pass.
 
 ### Unit Tests (`stats_test.go`)
 
 Standard Go unit tests cover the core statistical functions:
 
 - `computeStats` - verifies all computed statistics against a 31-number dataset
-- `calculatePercentile` - tests percentile interpolation at various points (p0, p25, p50, p75, p100)
-- `calculateSkewness` - validates skewness calculations for symmetric and skewed distributions
+- `calculatePercentile` - tests percentile interpolation at various points (p0, p25, p50, p75, p100), plus custom percentiles requested via `-p`
+- `calculateSkewness` and `calculateKurtosis` - validate shape statistics for symmetric and skewed distributions, including the small-n and zero-variance guards
 - `detectSymmetry` - verifies mirror-symmetry detection across even and odd counts, duplicates, negative values, and float tolerance
-- `readNumbers` - verifies parsing, the skipped-line count, and that blank lines are not counted as skipped
+- `readNumbers` - verifies parsing, the skipped-line count, that blank lines are not counted as skipped, and that `NaN` and infinities are rejected rather than propagated into every downstream statistic
 - `calculateMAD` - validates the median absolute deviation against hand-computed cases, including a zero-MAD case
 - modified z-score outliers - constructs a masking case where classic z-scores miss two same-tail outliers that modified z-scores catch at the same threshold
 - `calculateGeometricMean` - checks a closed-form case, the ordering against the arithmetic mean, and suppression for non-positive data
 - `calculateAutocorrelation` - verifies lag-1 autocorrelation for ascending, alternating, and shuffled sequences, plus small-n and zero-variance guards
 - `detectMonotonicity` - covers ascending, descending, constant, unordered, and two-element inputs
-- CLI-level tests - confirm that `-T` suppresses the trendline, autocorrelation, and input-order lines, that `-l` suppresses the geometric mean, and that `-e` and `-T` are mutually exclusive
+- `formatFloat` - confirms that small magnitudes keep their significant digits and that scientific notation is never emitted
+- `generateHistogram` - confirms bins never outnumber observations and that an occupied bin never renders as the empty-bin glyph
+- modal bin - verifies the fallback appears only when no value repeats, and that its reported count matches the values actually inside the bin
+- 95% confidence interval - checks the interval is centered on the mean with a half-width of 1.96 standard errors, and is suppressed when the standard error is zero
+- CLI-level tests - confirm that `-T` suppresses the trendline, autocorrelation, and input-order lines, that `-l` suppresses the geometric mean, that `-t`/`-T` and `-e`/`-T` are mutually exclusive, that `-k` rejects non-positive multipliers, that options placed after the filename are rejected rather than silently ignored, and that `-j` emits parseable JSON matching the text output
+
+The CLI tests compile the package once into a temporary binary rather than shelling out to `go run stats.go`, so they keep working if the program is ever split across multiple files.
 
 Run the tests with:
 ```bash
 go test -v
 ```
 
-### Independent Verification (`verify_stats.sh`)
+### Independent Verification with bc (`verify_stats.sh`)
 
 A shell script independently calculates statistics using `bc` (arbitrary precision calculator) and compares the results against the program's output. This provides external validation that the Go implementation produces correct results.
 
+The script reads the program through its JSON output (`-j`) and parses it with `jq`, so it compares numbers against numbers instead of scraping padded text. Beyond the core statistics it verifies the 95% confidence interval, EMA, custom percentiles, IQR outlier counts at two `-k` values, the trimmed mean, the log transform, symmetry, skipped-line counting, input-order detection, degenerate zero-variance handling, small-magnitude formatting, and every mutually exclusive flag pair.
+
 The script was developed and tested on `MacOS Sequoia 15.7.3` using:
 - `bc` - arbitrary precision calculator for sum, mean, variance, standard deviation, and percentile calculations
+- `jq` - to read values out of the program's JSON output
 - `sort` - for ordering the dataset to verify percentile indices
 
 Run the verification with:
@@ -601,7 +693,20 @@ Run the verification with:
 ./verify_stats.sh
 ```
 
-The script exits with code `0` if all values match, or code `1` if any discrepancies are found.
+### Independent Verification with Python (`verify_stats.py`)
+
+A pure-Python reimplementation of every statistic, using only the standard library and no third-party numeric packages. It compares its own results field by field against the program's JSON output across eleven datasets: the 31-value fixture, the symmetric fixture, the masking fixture, sorted and reverse-sorted input, constant data, data with negative values, a single value, and runs with `-e`, `-t`, and a custom `-k`.
+
+Where `verify_stats.sh` trades breadth for bc's arbitrary precision on one dataset, this script trades precision for breadth. It reaches the parts that are impractical to express in bc: the histogram and trendline glyph strings across five bin counts, symmetry detection, the modal bin, monotonicity classification, every flag validation and rejection message, and a check that no numeric field is left non-finite after `NaN` and `Inf` lines are filtered out. It performs over 700 individual comparisons.
+
+Block-glyph strings are compared with a one-level tolerance. A chunk average can land exactly on a rounding boundary, where a one-ulp difference between Go's and Python's `log()` flips the chosen block; differences of two or more levels still fail.
+
+Run the verification with:
+```bash
+./verify_stats.py
+```
+
+Both scripts exit with code `0` if all values match, or code `1` if any discrepancies are found.
 
 ### Test Data Characteristics
 
@@ -614,7 +719,7 @@ A second fixture of 40 values exercises symmetry detection: 20 disjoint pairs, e
 
 A third fixture of 12 values (`masking_data.txt`) exercises masking in z-score outlier detection: a tight cluster around 11 with two adjacent outliers at 50 and 52. The outliers inflate the mean and standard deviation enough that neither reaches a classic z-score of 2.5, while both far exceed the modified z-score threshold built from the median and MAD. It exists to prove the two detection methods genuinely disagree on the same data.
 
-The tests focus on typical usage patterns and do not cover exotic edge cases, extreme values, or adversarial inputs. Users requiring high-assurance results for critical applications should perform additional validation appropriate to their use case.
+The tests focus on typical usage patterns and do not cover exotic edge cases, extreme values, or adversarial inputs. In particular, values near the limits of float64 (magnitudes around 1e300) can overflow the sum of squared deviations and produce an infinite variance, and are not guarded against. Users requiring high-assurance results for critical applications should perform additional validation appropriate to their use case.
 
 ## Acknowledgements
 

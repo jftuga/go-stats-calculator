@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"os/exec"
@@ -12,6 +14,34 @@ import (
 )
 
 const epsilon = 1e-4
+
+// statsBin is the path to the binary compiled once for the CLI-level tests. Building
+// the whole package (rather than "go run stats.go") keeps these tests working if the
+// program is ever split across multiple files.
+var statsBin string
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "stats-cli")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create temp dir: %v\n", err)
+		os.Exit(1)
+	}
+	statsBin = filepath.Join(dir, "stats")
+	if out, err := exec.Command("go", "build", "-o", statsBin, ".").CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to build test binary: %v\n%s", err, out)
+		os.RemoveAll(dir)
+		os.Exit(1)
+	}
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// runStats executes the compiled binary and returns its combined output.
+func runStats(args ...string) (string, error) {
+	out, err := exec.Command(statsBin, args...).CombinedOutput()
+	return string(out), err
+}
 
 func floatEquals(a, b float64) bool {
 	return math.Abs(a-b) < epsilon
@@ -134,6 +164,13 @@ func TestComputeStatsSingleValue(t *testing.T) {
 	// StdDev and Variance should be 0 for single value
 	if !floatEquals(stats.StdDev, 0) {
 		t.Errorf("StdDev: got %v, expected 0", stats.StdDev)
+	}
+	if !floatEquals(stats.Variance, 0) {
+		t.Errorf("Variance: got %v, expected 0", stats.Variance)
+	}
+	// A confidence interval needs at least two observations
+	if stats.CIValid {
+		t.Error("CIValid: got true, expected false for a single value")
 	}
 }
 
@@ -736,26 +773,50 @@ func TestTrimDataset(t *testing.T) {
 }
 
 func TestTrimDatasetTooSmall(t *testing.T) {
-	// 3 values with trim=50%: trimCount = floor(3*50/100) = 1, remaining = 1 → should work
 	// 2 values with trim=50%: trimCount = floor(2*50/100) = 1, remaining = 0 → error
-	sorted := []float64{1, 2}
-	sort.Float64s(sorted)
-	trimCount := int(math.Floor(float64(len(sorted)) * 50 / 100.0))
-	remaining := len(sorted) - 2*trimCount
-	if remaining >= 1 {
-		t.Errorf("Expected remaining < 1 for 2 values at 50%% trim, got %d", remaining)
+	tooSmall := writeTempData(t, []float64{1, 2})
+	output, err := runStats("-T", "50", tooSmall)
+	if err == nil {
+		t.Fatalf("expected error trimming 50%% from 2 values, got none:\n%s", output)
+	}
+	if !strings.Contains(output, "dataset too small") {
+		t.Errorf("expected 'dataset too small' error, got: %s", output)
+	}
+
+	// 3 values with trim=50%: trimCount = floor(3*50/100) = 1, remaining = 1 → succeeds
+	justEnough := writeTempData(t, []float64{1, 2, 3})
+	output, err = runStats("-T", "50", justEnough)
+	if err != nil {
+		t.Fatalf("expected success trimming 50%% from 3 values: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "3 → 1 values") {
+		t.Errorf("expected header showing 3 → 1 values, got:\n%s", output)
 	}
 }
 
 func TestTrimDatasetMutualExclusion(t *testing.T) {
-	cmd := exec.Command("go", "run", "stats.go", "-t", "10", "-T", "10", "test_data.txt")
-	output, err := cmd.CombinedOutput()
+	output, err := runStats("-t", "10", "-T", "10", "test_data.txt")
 	if err == nil {
 		t.Fatal("Expected error when using both -t and -T, but got none")
 	}
-	if !strings.Contains(string(output), "mutually exclusive") {
-		t.Errorf("Expected mutual exclusion error message, got: %s", string(output))
+	if !strings.Contains(output, "mutually exclusive") {
+		t.Errorf("Expected mutual exclusion error message, got: %s", output)
 	}
+}
+
+// writeTempData writes values one per line to a temp file and returns its path.
+func writeTempData(t *testing.T, values []float64) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "data.txt")
+	var sb strings.Builder
+	for _, v := range values {
+		sb.WriteString(strconv.FormatFloat(v, 'f', -1, 64))
+		sb.WriteString("\n")
+	}
+	if err := os.WriteFile(path, []byte(sb.String()), 0o644); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+	return path
 }
 
 func TestCalculateEMA(t *testing.T) {
@@ -1011,22 +1072,20 @@ func TestSymmetryOutputLine(t *testing.T) {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
 
-	cmd := exec.Command("go", "run", "stats.go", path)
-	output, err := cmd.CombinedOutput()
+	output, err := runStats(path)
 	if err != nil {
-		t.Fatalf("go run failed: %v\n%s", err, string(output))
+		t.Fatalf("stats failed: %v\n%s", err, output)
 	}
-	if !strings.Contains(string(output), "Symmetric about 500 (20 pairs)") {
-		t.Errorf("expected symmetric output line, got:\n%s", string(output))
+	if !strings.Contains(output, "Symmetric about 500 (20 pairs)") {
+		t.Errorf("expected symmetric output line, got:\n%s", output)
 	}
 
-	cmd = exec.Command("go", "run", "stats.go", "test_data.txt")
-	output, err = cmd.CombinedOutput()
+	output, err = runStats("test_data.txt")
 	if err != nil {
-		t.Fatalf("go run failed: %v\n%s", err, string(output))
+		t.Fatalf("stats failed: %v\n%s", err, output)
 	}
 	found := false
-	for _, line := range strings.Split(string(output), "\n") {
+	for _, line := range strings.Split(output, "\n") {
 		if strings.HasPrefix(line, "Symmetry:") {
 			found = true
 			if !strings.Contains(line, "None") {
@@ -1035,7 +1094,7 @@ func TestSymmetryOutputLine(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("Symmetry line not found in output:\n%s", string(output))
+		t.Errorf("Symmetry line not found in output:\n%s", output)
 	}
 }
 
@@ -1304,39 +1363,623 @@ func TestDetectMonotonicity(t *testing.T) {
 }
 
 func TestOrderStatisticsSuppressedUnderTrim(t *testing.T) {
-	cmd := exec.Command("go", "run", "stats.go", "-T", "10", "test_data.txt")
-	output, err := cmd.CombinedOutput()
+	output, err := runStats("-T", "10", "test_data.txt")
 	if err != nil {
-		t.Fatalf("go run failed: %v\n%s", err, string(output))
+		t.Fatalf("stats failed: %v\n%s", err, output)
 	}
 	for _, label := range []string{"Trendline:", "Autocorrelation:", "Input Order:"} {
-		if strings.Contains(string(output), label) {
-			t.Errorf("expected no %q line under -T, got:\n%s", label, string(output))
+		if strings.Contains(output, label) {
+			t.Errorf("expected no %q line under -T, got:\n%s", label, output)
 		}
 	}
-	if !strings.Contains(string(output), "MAD*:") {
-		t.Errorf("expected starred MAD line under -T, got:\n%s", string(output))
+	if !strings.Contains(output, "(trimmed dataset: 10% from each tail, 31 → 25 values)") {
+		t.Errorf("expected trimmed-dataset header under -T, got:\n%s", output)
+	}
+	if !strings.Contains(output, "all statistics above are computed on the trimmed dataset") {
+		t.Errorf("expected trimmed-dataset footnote under -T, got:\n%s", output)
+	}
+}
+
+// The star convention was dropped: under -T every statistic is computed on the
+// trimmed dataset, so marking a subset implied the rest were unaffected.
+func TestNoStarMarkersUnderTrim(t *testing.T) {
+	output, err := runStats("-T", "10", "test_data.txt")
+	if err != nil {
+		t.Fatalf("stats failed: %v\n%s", err, output)
+	}
+	for _, line := range strings.Split(output, "\n") {
+		label, _, found := strings.Cut(line, ":")
+		if found && strings.HasSuffix(label, "*") {
+			t.Errorf("unexpected star marker on label %q", label)
+		}
 	}
 }
 
 func TestGeometricSuppressedUnderLogTransform(t *testing.T) {
-	cmd := exec.Command("go", "run", "stats.go", "-l", "test_data.txt")
-	output, err := cmd.CombinedOutput()
+	output, err := runStats("-l", "test_data.txt")
 	if err != nil {
-		t.Fatalf("go run failed: %v\n%s", err, string(output))
+		t.Fatalf("stats failed: %v\n%s", err, output)
 	}
-	if strings.Contains(string(output), "Geometric Mean") {
-		t.Errorf("expected no Geometric Mean line under -l, got:\n%s", string(output))
+	if strings.Contains(output, "Geometric Mean") {
+		t.Errorf("expected no Geometric Mean line under -l, got:\n%s", output)
 	}
 }
 
 func TestEMATrimDatasetMutualExclusion(t *testing.T) {
-	cmd := exec.Command("go", "run", "stats.go", "-e", "5", "-T", "10", "test_data.txt")
-	output, err := cmd.CombinedOutput()
+	output, err := runStats("-e", "5", "-T", "10", "test_data.txt")
 	if err == nil {
 		t.Fatal("Expected error when using both -e and -T, but got none")
 	}
-	if !strings.Contains(string(output), "mutually exclusive") {
-		t.Errorf("Expected mutual exclusion error message, got: %s", string(output))
+	if !strings.Contains(output, "mutually exclusive") {
+		t.Errorf("Expected mutual exclusion error message, got: %s", output)
+	}
+}
+
+// --- Input validation: NaN and infinities parse but must be rejected ---
+
+func TestReadNumbersRejectsNonFinite(t *testing.T) {
+	input := "1\nNaN\n2\nInf\n3\n+Inf\n-Inf\n4\n"
+	numbers, skipped, err := readNumbers(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("readNumbers returned error: %v", err)
+	}
+	expected := []float64{1, 2, 3, 4}
+	if !floatSliceEquals(numbers, expected) {
+		t.Errorf("readNumbers: got %v, expected %v", numbers, expected)
+	}
+	// NaN, Inf, +Inf, -Inf all count as invalid lines
+	if skipped != 4 {
+		t.Errorf("skipped: got %d, expected 4", skipped)
+	}
+}
+
+func TestNonFiniteInputDoesNotPoisonOutput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nan.txt")
+	if err := os.WriteFile(path, []byte("1\n2\nNaN\n4\n"), 0o644); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+	output, err := runStats(path)
+	if err != nil {
+		t.Fatalf("stats failed: %v\n%s", err, output)
+	}
+	if strings.Contains(output, "NaN") && !strings.Contains(output, "invalid number") {
+		t.Errorf("NaN leaked into computed output:\n%s", output)
+	}
+	for _, want := range []string{"Count:             3", "Skipped:           1 invalid line", "Min:               1", "Max:               4"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected %q in output, got:\n%s", want, output)
+		}
+	}
+}
+
+// --- Number formatting: small magnitudes must not collapse to zero ---
+
+func TestFormatFloatAdaptiveDecimals(t *testing.T) {
+	tests := []struct {
+		value    float64
+		expected string
+	}{
+		{0, "0"},
+		{42, "42"},
+		{-42, "-42"},
+		{20.73, "20.73"},
+		{55.659728571, "55.6597"},
+		{0.5, "0.5"},
+		// Below the old fixed 4-decimal floor these all used to print as "0"
+		{0.00004, "0.00004"},
+		{0.00006, "0.00006"},
+		{0.000012345, "0.00001234"},
+		{-0.00004, "-0.00004"},
+		{0.0000000001234, "0.0000000001234"},
+	}
+	for _, tc := range tests {
+		if got := formatFloat(tc.value); got != tc.expected {
+			t.Errorf("formatFloat(%v): got %q, expected %q", tc.value, got, tc.expected)
+		}
+	}
+}
+
+func TestFormatFloatNeverUsesScientificNotation(t *testing.T) {
+	for _, v := range []float64{1e-12, 5e-7, 1.5e9, -3.25e-8} {
+		got := formatFloat(v)
+		if strings.ContainsAny(got, "eE") {
+			t.Errorf("formatFloat(%v) used scientific notation: %q", v, got)
+		}
+	}
+}
+
+func TestSmallMagnitudeStatsSurviveFormatting(t *testing.T) {
+	path := writeTempData(t, []float64{0.00004, 0.00006})
+	output, err := runStats(path)
+	if err != nil {
+		t.Fatalf("stats failed: %v\n%s", err, output)
+	}
+	for _, want := range []string{"Min:               0.00004", "Max:               0.00006", "Mean:              0.00005"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected %q in output, got:\n%s", want, output)
+		}
+	}
+}
+
+// --- Flag validation ---
+
+func TestIQRMultiplierValidation(t *testing.T) {
+	for _, k := range []string{"-1", "0"} {
+		output, err := runStats("-k", k, "test_data.txt")
+		if err == nil {
+			t.Errorf("expected error for -k %s, got none:\n%s", k, output)
+		}
+		if !strings.Contains(output, "IQR multiplier must be greater than 0") {
+			t.Errorf("expected IQR multiplier error for -k %s, got: %s", k, output)
+		}
+	}
+
+	if output, err := runStats("-k", "0.5", "test_data.txt"); err != nil {
+		t.Errorf("expected -k 0.5 to succeed: %v\n%s", err, output)
+	}
+}
+
+func TestExtraArgumentsRejected(t *testing.T) {
+	// Go's flag package stops at the first non-flag argument, so these options
+	// used to be accepted and silently ignored.
+	output, err := runStats("test_data.txt", "-z", "2.0")
+	if err == nil {
+		t.Fatalf("expected error for options after the filename, got none:\n%s", output)
+	}
+	if !strings.Contains(output, "expected at most one input file") {
+		t.Errorf("expected extra-argument error, got: %s", output)
+	}
+	if !strings.Contains(output, "options must appear before the filename") {
+		t.Errorf("expected hint about option ordering, got: %s", output)
+	}
+
+	output, err = runStats("test_data.txt", "symmetric_data.txt")
+	if err == nil {
+		t.Fatalf("expected error for two input files, got none:\n%s", output)
+	}
+}
+
+func TestVersionFlagIgnoresOtherValidation(t *testing.T) {
+	// -v is handled before flag validation, so an invalid bin count must not mask it
+	output, err := runStats("-v", "-b", "3")
+	if err != nil {
+		t.Fatalf("expected -v to succeed regardless of other flags: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "version "+PgmVersion) {
+		t.Errorf("expected version output, got: %s", output)
+	}
+}
+
+// --- Z-score reporting on degenerate data ---
+
+func TestZScoreReportedWhenStdDevIsZero(t *testing.T) {
+	stats, err := computeStats([]float64{5, 5, 5}, nil, 1.5, 16, 2.0, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	// The request is recorded even though it cannot be satisfied
+	if !floatEquals(stats.ZScoreThreshold, 2.0) {
+		t.Errorf("ZScoreThreshold: got %v, expected 2.0", stats.ZScoreThreshold)
+	}
+	if stats.ZScoreValid {
+		t.Error("ZScoreValid: got true, expected false for zero standard deviation")
+	}
+	if stats.ModZValid {
+		t.Error("ModZValid: got true, expected false for zero MAD")
+	}
+	if stats.ZScoreOutliers != nil {
+		t.Errorf("ZScoreOutliers: got %v, expected nil", stats.ZScoreOutliers)
+	}
+}
+
+func TestZScoreSectionNotSilentlyDropped(t *testing.T) {
+	path := writeTempData(t, []float64{5, 5, 5, 5})
+	output, err := runStats("-z", "2.0", path)
+	if err != nil {
+		t.Fatalf("stats failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "N/A - standard deviation is zero") {
+		t.Errorf("expected Z-outlier N/A line, got:\n%s", output)
+	}
+	if !strings.Contains(output, "N/A - MAD is zero") {
+		t.Errorf("expected Mod Z-outlier N/A line, got:\n%s", output)
+	}
+}
+
+// --- Custom percentiles ---
+
+func TestCustomPercentiles(t *testing.T) {
+	stats, err := computeStats(testData, []float64{10, 90, 99.9}, 1.5, 16, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if len(stats.CustomPercentiles) != 3 {
+		t.Fatalf("CustomPercentiles: got %d entries, expected 3", len(stats.CustomPercentiles))
+	}
+
+	sorted := make([]float64, len(testData))
+	copy(sorted, testData)
+	sort.Float64s(sorted)
+	for _, p := range []float64{10, 90, 99.9} {
+		want := calculatePercentile(sorted, p/100.0)
+		if got := stats.CustomPercentiles[p]; !floatEquals(got, want) {
+			t.Errorf("CustomPercentiles[%v]: got %v, expected %v", p, got, want)
+		}
+	}
+
+	// p0 and p100 are the min and max
+	edges, err := computeStats(testData, []float64{0, 100}, 1.5, 16, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if !floatEquals(edges.CustomPercentiles[0], edges.Min) {
+		t.Errorf("p0: got %v, expected Min %v", edges.CustomPercentiles[0], edges.Min)
+	}
+	if !floatEquals(edges.CustomPercentiles[100], edges.Max) {
+		t.Errorf("p100: got %v, expected Max %v", edges.CustomPercentiles[100], edges.Max)
+	}
+}
+
+func TestCustomPercentilesDisabled(t *testing.T) {
+	stats, err := computeStats(testData, nil, 1.5, 16, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if stats.CustomPercentiles != nil {
+		t.Errorf("CustomPercentiles: got %v, expected nil", stats.CustomPercentiles)
+	}
+}
+
+func TestCustomPercentilesCLI(t *testing.T) {
+	output, err := runStats("-p", "10,90", "test_data.txt")
+	if err != nil {
+		t.Fatalf("stats failed: %v\n%s", err, output)
+	}
+	for _, want := range []string{"Percentile (p10):", "Percentile (p90):"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected %q in output, got:\n%s", want, output)
+		}
+	}
+
+	if output, err := runStats("-p", "101", "test_data.txt"); err == nil {
+		t.Errorf("expected error for out-of-range percentile, got none:\n%s", output)
+	}
+	if output, err := runStats("-p", "abc", "test_data.txt"); err == nil {
+		t.Errorf("expected error for unparseable percentile, got none:\n%s", output)
+	}
+}
+
+// --- 95% confidence interval for the mean ---
+
+func TestConfidenceInterval(t *testing.T) {
+	stats, err := computeStats(testData, nil, 1.5, 16, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if !stats.CIValid {
+		t.Fatal("CIValid: got false, expected true")
+	}
+	// mean 51.7258 ± 1.96 * 6.0303
+	if !floatEquals(stats.CI95Lower, 51.7258-1.96*6.0303) {
+		t.Errorf("CI95Lower: got %v", stats.CI95Lower)
+	}
+	if !floatEquals(stats.CI95Upper, 51.7258+1.96*6.0303) {
+		t.Errorf("CI95Upper: got %v", stats.CI95Upper)
+	}
+	// The interval is centered on the mean and its half-width is 1.96 standard errors
+	if !floatEquals((stats.CI95Lower+stats.CI95Upper)/2, stats.Mean) {
+		t.Errorf("interval is not centered on the mean")
+	}
+	if !floatEquals((stats.CI95Upper-stats.CI95Lower)/2, ci95Z*stats.StdErr) {
+		t.Errorf("interval half-width is not 1.96 standard errors")
+	}
+}
+
+func TestConfidenceIntervalSuppressedForZeroSpread(t *testing.T) {
+	stats, err := computeStats([]float64{7, 7, 7}, nil, 1.5, 16, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if stats.CIValid {
+		t.Error("CIValid: got true, expected false when the standard error is zero")
+	}
+
+	output, err := runStats(writeTempData(t, []float64{7, 7, 7}))
+	if err != nil {
+		t.Fatalf("stats failed: %v\n%s", err, output)
+	}
+	if strings.Contains(output, "95% CI") {
+		t.Errorf("expected no CI line for zero-spread data, got:\n%s", output)
+	}
+}
+
+// --- Histogram binning ---
+
+func TestGenerateHistogramCapsBinsToDataLength(t *testing.T) {
+	// 7 values with 20 requested bins must produce 7 bins, matching the trendline
+	data := []float64{1, 2, 3, 4, 5, 8, 9}
+	hist := generateHistogram(data, 20)
+	if got := len([]rune(hist)); got != 7 {
+		t.Errorf("expected 7 runes when bins exceed data length, got %d (%q)", got, hist)
+	}
+	trend := generateTrendline(data, 20)
+	if len([]rune(hist)) != len([]rune(trend)) {
+		t.Errorf("histogram (%d) and trendline (%d) lengths must match", len([]rune(hist)), len([]rune(trend)))
+	}
+}
+
+func TestGenerateHistogramSparseBinsAreVisible(t *testing.T) {
+	// One dominant bin plus nine bins holding a single value each. Sparse bins must
+	// not render as the same glyph as an empty bin.
+	data := make([]float64, 0, 110)
+	for i := 0; i < 100; i++ {
+		data = append(data, 0)
+	}
+	for i := 1; i <= 9; i++ {
+		data = append(data, float64(i*10))
+	}
+	data = append(data, 100)
+	sort.Float64s(data)
+
+	hist := []rune(generateHistogram(data, 11))
+	if hist[0] != '█' {
+		t.Errorf("expected a full block for the dominant bin, got %c", hist[0])
+	}
+	for i, r := range hist[1:] {
+		if r == '▁' {
+			t.Errorf("occupied bin %d rendered as the empty-bin glyph", i+1)
+		}
+	}
+}
+
+// --- Modal bin fallback for continuous data ---
+
+func TestModalBinReportedWhenNoModeExists(t *testing.T) {
+	stats, err := computeStats(symmetricTestData, nil, 1.5, 16, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if len(stats.Mode) != 0 {
+		t.Fatalf("Mode: got %v, expected none for all-distinct data", stats.Mode)
+	}
+	if !stats.ModalBinValid {
+		t.Fatal("ModalBinValid: got false, expected true")
+	}
+	if stats.ModalBinCount < 1 {
+		t.Errorf("ModalBinCount: got %d, expected at least 1", stats.ModalBinCount)
+	}
+	if stats.ModalBinLow >= stats.ModalBinHigh {
+		t.Errorf("modal bin edges are not ordered: [%v, %v]", stats.ModalBinLow, stats.ModalBinHigh)
+	}
+	if stats.ModalBinLow < stats.Min || stats.ModalBinHigh > stats.Max+1e-9 {
+		t.Errorf("modal bin [%v, %v] falls outside the data range [%v, %v]",
+			stats.ModalBinLow, stats.ModalBinHigh, stats.Min, stats.Max)
+	}
+
+	// The reported count must match the number of values actually inside the bin
+	inside := 0
+	for _, v := range symmetricTestData {
+		if v >= stats.ModalBinLow && v < stats.ModalBinHigh {
+			inside++
+		}
+	}
+	if inside != stats.ModalBinCount {
+		t.Errorf("ModalBinCount: got %d, but %d values fall in [%v, %v)",
+			stats.ModalBinCount, inside, stats.ModalBinLow, stats.ModalBinHigh)
+	}
+}
+
+func TestModalBinSuppressedWhenModeExists(t *testing.T) {
+	stats, err := computeStats(testData, nil, 1.5, 16, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if stats.ModalBinValid {
+		t.Error("ModalBinValid: got true, expected false when a real mode exists")
+	}
+}
+
+func TestModalBinSuppressedForZeroSpread(t *testing.T) {
+	// All identical: there is a mode, so no fallback. All distinct but only one
+	// value: nothing to bin.
+	single, err := computeStats([]float64{42}, nil, 1.5, 16, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("computeStats returned error: %v", err)
+	}
+	if single.ModalBinValid {
+		t.Error("ModalBinValid: got true, expected false for a single value")
+	}
+}
+
+func TestModalBinOutputLine(t *testing.T) {
+	output, err := runStats("symmetric_data.txt")
+	if err != nil {
+		t.Fatalf("stats failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "modal bin:") {
+		t.Errorf("expected modal bin on the Mode line, got:\n%s", output)
+	}
+
+	output, err = runStats("test_data.txt")
+	if err != nil {
+		t.Fatalf("stats failed: %v\n%s", err, output)
+	}
+	if strings.Contains(output, "modal bin:") {
+		t.Errorf("expected no modal bin when a mode exists, got:\n%s", output)
+	}
+}
+
+// --- Order-dependence warning ---
+
+func TestSortedInputWarningNamesEMA(t *testing.T) {
+	path := writeTempData(t, []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
+
+	output, err := runStats("-e", "3", path)
+	if err != nil {
+		t.Fatalf("stats failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "trendline, autocorrelation, and EMA reflect this sort order") {
+		t.Errorf("expected EMA named in the sort-order warning, got:\n%s", output)
+	}
+
+	// Without -e there is no EMA line, so it must not be named
+	output, err = runStats(path)
+	if err != nil {
+		t.Fatalf("stats failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "trendline and autocorrelation reflect this sort order") {
+		t.Errorf("expected the two-statistic warning without -e, got:\n%s", output)
+	}
+}
+
+// --- JSON output ---
+
+func TestJSONOutput(t *testing.T) {
+	output, err := runStats("-j", "-z", "2.0", "-p", "10,90", "test_data.txt")
+	if err != nil {
+		t.Fatalf("stats failed: %v\n%s", err, output)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(output), &got); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, output)
+	}
+
+	want := map[string]float64{
+		"count":    31,
+		"sum":      1603.5,
+		"mean":     51.7258,
+		"median":   50,
+		"stdDev":   33.5751,
+		"variance": 1127.2848,
+		"q1":       27.5,
+		"q3":       72.625,
+		"p95":      97.5,
+		"p99":      135,
+		"iqr":      45.125,
+		"skewness": 0.7271,
+		"kurtosis": 0.8884,
+		"mad":      37.065,
+		"stdErr":   6.0303,
+	}
+	for key, expected := range want {
+		v, ok := got[key].(float64)
+		if !ok {
+			t.Errorf("JSON key %q missing or not a number", key)
+			continue
+		}
+		if !floatEquals(v, expected) {
+			t.Errorf("JSON %q: got %v, expected %v", key, v, expected)
+		}
+	}
+
+	if got["version"] != PgmVersion {
+		t.Errorf("JSON version: got %v, expected %v", got["version"], PgmVersion)
+	}
+	if got["inputOrder"] != "unordered" {
+		t.Errorf("JSON inputOrder: got %v, expected unordered", got["inputOrder"])
+	}
+
+	pcts, ok := got["customPercentiles"].(map[string]any)
+	if !ok {
+		t.Fatalf("JSON customPercentiles missing: %v", got["customPercentiles"])
+	}
+	for _, key := range []string{"10", "90"} {
+		if _, ok := pcts[key]; !ok {
+			t.Errorf("JSON customPercentiles missing key %q", key)
+		}
+	}
+
+	// Outlier lists must be arrays, never null, when they were computed
+	for _, key := range []string{"outliers", "zScoreOutliers", "modZOutliers"} {
+		if _, ok := got[key].([]any); !ok {
+			t.Errorf("JSON %q: got %v, expected an array", key, got[key])
+		}
+	}
+}
+
+func TestJSONMatchesTextOutput(t *testing.T) {
+	jsonOut, err := runStats("-j", "sample_data.txt")
+	if err != nil {
+		t.Fatalf("stats failed: %v\n%s", err, jsonOut)
+	}
+	textOut, err := runStats("sample_data.txt")
+	if err != nil {
+		t.Fatalf("stats failed: %v\n%s", err, textOut)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(jsonOut), &parsed); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	// Every JSON scalar the text output also prints must format identically
+	pairs := []struct {
+		key   string
+		label string
+	}{
+		{"sum", "Sum:"},
+		{"min", "Min:"},
+		{"max", "Max:"},
+		{"mean", "Mean:"},
+		{"median", "Median (p50):"},
+		{"stdDev", "Std Deviation:"},
+		{"variance", "Variance:"},
+		{"iqr", "IQR:"},
+	}
+	for _, p := range pairs {
+		v, ok := parsed[p.key].(float64)
+		if !ok {
+			t.Errorf("JSON key %q missing", p.key)
+			continue
+		}
+		want := p.label + " " + formatFloat(v)
+		found := false
+		for _, line := range strings.Split(textOut, "\n") {
+			if strings.HasPrefix(line, p.label) && strings.Join(strings.Fields(line), " ") == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("text output has no line matching %q", want)
+		}
+	}
+}
+
+func TestJSONUnderTrimAndLogTransform(t *testing.T) {
+	output, err := runStats("-j", "-T", "10", "test_data.txt")
+	if err != nil {
+		t.Fatalf("stats failed: %v\n%s", err, output)
+	}
+	var trimmed map[string]any
+	if err := json.Unmarshal([]byte(output), &trimmed); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, output)
+	}
+	if trimmed["count"].(float64) != 25 {
+		t.Errorf("JSON count under -T: got %v, expected 25", trimmed["count"])
+	}
+	if trimmed["trimDatasetOrigN"].(float64) != 31 {
+		t.Errorf("JSON trimDatasetOrigN: got %v, expected 31", trimmed["trimDatasetOrigN"])
+	}
+	if trimmed["inputOrder"] != "" {
+		t.Errorf("JSON inputOrder under -T: got %v, expected empty", trimmed["inputOrder"])
+	}
+	if trimmed["autocorrValid"] != false {
+		t.Errorf("JSON autocorrValid under -T: got %v, expected false", trimmed["autocorrValid"])
+	}
+
+	output, err = runStats("-j", "-l", "test_data.txt")
+	if err != nil {
+		t.Fatalf("stats failed: %v\n%s", err, output)
+	}
+	var logged map[string]any
+	if err := json.Unmarshal([]byte(output), &logged); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, output)
+	}
+	if logged["logTransformed"] != true {
+		t.Errorf("JSON logTransformed: got %v, expected true", logged["logTransformed"])
+	}
+	if logged["geoMeanValid"] != false {
+		t.Errorf("JSON geoMeanValid under -l: got %v, expected false", logged["geoMeanValid"])
 	}
 }
