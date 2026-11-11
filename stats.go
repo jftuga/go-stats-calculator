@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 )
@@ -125,6 +126,7 @@ func main() {
 	trimDatasetPct := flag.Float64("T", 0, "trim dataset: remove percentage from each tail before computing all statistics (0-50)")
 	emaSpan := flag.Int("e", 0, "EMA span (number of periods) for exponential moving average (>= 2)")
 	jsonOutput := flag.Bool("j", false, "emit results as JSON instead of formatted text")
+	htmlOutput := flag.Bool("html", false, "also write a standalone HTML report beside the input (stdin: stats--<timestamp>.html)")
 	flag.Parse()
 
 	// Handled before validation so the version is always reachable.
@@ -188,6 +190,28 @@ func main() {
 	if len(args) < 1 && inputIsTerminal {
 		flag.Usage()
 		os.Exit(0)
+	}
+
+	inputArg := ""
+	if len(args) == 1 {
+		inputArg = args[0]
+	}
+
+	// The report path is derived and checked before any input is read, so a
+	// refusal never follows a partially consumed stdin.
+	now := time.Now()
+	var htmlPath string
+	if *htmlOutput {
+		var err error
+		htmlPath, err = htmlOutputPath(inputArg, now)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := checkNotSameFile(inputArg, htmlPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	var reader io.Reader
@@ -271,6 +295,16 @@ func main() {
 		stats.GeoMeanValid = false
 	}
 
+	// The report is written before stdout, so a downstream "head" closing the
+	// pipe cannot prevent it, and a write failure never follows a full report.
+	if *htmlOutput {
+		if err := writeHTMLReport(htmlPath, stats, inputArg, now, *numBins, *logTransform); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "HTML report written to %s\n", htmlPath)
+	}
+
 	if *jsonOutput {
 		if err := printJSON(stats, *logTransform); err != nil {
 			fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
@@ -321,9 +355,16 @@ func main() {
 }
 
 // printJSON writes the statistics to stdout as an indented JSON object.
+func printJSON(s *Stats, logTransformed bool) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(newStatsOutput(s, logTransformed))
+}
+
+// newStatsOutput builds the JSON view of s shared by -j and the HTML report.
 // Outlier lists follow a two-state convention: an empty array means the detector
 // ran and found nothing, while null means it never ran.
-func printJSON(s *Stats, logTransformed bool) error {
+func newStatsOutput(s *Stats, logTransformed bool) statsOutput {
 	if s.Outliers == nil {
 		s.Outliers = []float64{}
 	}
@@ -346,10 +387,7 @@ func printJSON(s *Stats, logTransformed bool) error {
 			out.CustomPercentiles[formatFloat(k)] = v
 		}
 	}
-
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(out)
+	return out
 }
 
 // readNumbers reads floating-point numbers (one per line) from an io.Reader.

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Input}} - stats report</title>
+<style>{{.CSS}}</style>
+</head>
+<body>
+<header class="report-header">
+<h1>{{.Input}}</h1>
+<p class="meta">Generated {{.Generated}} by stats {{.Version}}</p>
+{{- if .Options}}
+<ul class="chips" aria-label="Active options">
+{{- range .Options}}
+<li class="chip">{{.Flag}}{{if .Value}} {{.Value}}{{end}}</li>
+{{- end}}
+</ul>
+{{- end}}
+{{- if .LogTransformed}}
+<p class="banner">(log-transformed, base e)</p>
+{{- end}}
+{{- if .TrimDatasetPct}}
+<p class="banner">(trimmed dataset: {{.TrimDatasetPct}}% from each tail, {{.TrimOrigN}} → {{.Count}} values)</p>
+{{- end}}
+</header>
+<script type="application/json" id="report-data">{{.Data}}</script>
+<script>{{.JS}}</script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #59636e;
+  --chip-bg: #eef1f4;
+  --chip-border: #d1d9e0;
+  --banner-bg: #fff8c5;
+  --banner-border: #d4a72c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --chip-bg: #212830;
+    --chip-border: #3d444d;
+    --banner-bg: #2e2a1a;
+    --banner-border: #9e6a03;
+  }
+}
+
+body {
+  margin: 0;
+  padding: 1.5rem;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.report-header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.6rem;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  padding: 0.1rem 0.6rem;
+  border: 1px solid var(--chip-border);
+  border-radius: 999px;
+  background: var(--chip-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+}
+
+.banner {
+  margin: 0 0 0.75rem;
+  padding: 0.4rem 0.75rem;
+  border-left: 4px solid var(--banner-border);
+  background: var(--banner-bg);
+}
