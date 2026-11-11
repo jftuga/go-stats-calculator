@@ -25,17 +25,46 @@
 <p class="banner">(trimmed dataset: {{.TrimDatasetPct}}% from each tail, {{.TrimOrigN}} → {{.Count}} values)</p>
 {{- end}}
 </header>
-{{- range .Report.Sections}}
+{{- range $index, $section := .Report.Sections}}
 <section class="card">
 <h2>{{.Title}}</h2>
 <dl class="rows">
 {{- range .Rows}}
 <div class="row">
 <dt><button type="button" class="term" popovertarget="def-{{.ID}}">{{.Label}}</button></dt>
-<dd class="value value-{{.Kind}}">{{if .List}}{{template "list" .List}}{{else}}{{.Value}}{{end}}</dd>
+<dd class="value value-{{.Kind}}">{{if .List}}{{template "list" .List}}{{else}}{{.Value}}{{end}}{{template "rowchart" .Kind}}</dd>
 </div>
+{{- if eq .Kind "iqr"}}
+</dl>
+<div class="charts">
+<figure class="chart-figure">
+<figcaption class="chart-title">Box plot (Tukey, IQR method)</figcaption>
+<div class="chart" data-chart="box"></div>
+</figure>
+<figure class="chart-figure">
+<figcaption class="chart-title">Percentile ladder</figcaption>
+<div class="chart" data-chart="ladder"></div>
+</figure>
+</div>
+<dl class="rows">
+{{- end}}
 {{- end}}
 </dl>
+{{- if eq $index 0}}
+<div class="charts">
+<figure class="chart-figure">
+<figcaption class="chart-title">Range: min to max with quartiles</figcaption>
+<div class="chart" data-chart="range"></div>
+</figure>
+</div>
+{{- else if eq $index 1}}
+<div class="charts">
+<figure class="chart-figure">
+<figcaption class="chart-title">Centers and the 95% confidence interval of the mean</figcaption>
+<div class="chart" data-chart="center"></div>
+</figure>
+</div>
+{{- end}}
 {{- range .Rows}}
 <div popover="auto" id="def-{{.ID}}" class="def">
 <h3>{{.Label}}</h3>{{template "definition" .Kind}}
@@ -66,6 +95,11 @@
 {{- if .Tail}}<li class="gap" aria-hidden="true">…</li>{{range .Tail}}<li>{{.}}</li>{{end}}{{end -}}
 </ul>
 </details>
+{{- end}}
+{{- define "rowchart"}}
+{{- if eq . "distinct"}}<div class="chart chart-inline" data-chart="distinct"></div>
+{{- else if eq . "skewness" "kurtosis" "cv"}}<div class="chart chart-inline" data-chart="{{.}}"></div>
+{{- end}}
 {{- end}}
 {{- define "count"}}{{.}} {{if eq . 1}}value{{else}}values{{end}}{{end}}
 {{- define "definition"}}

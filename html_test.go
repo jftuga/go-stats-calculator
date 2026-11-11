@@ -365,7 +365,8 @@ func TestRenderReportSections(t *testing.T) {
 		if row["value"] != want {
 			t.Errorf("row %q value = %v, want %q", kind, row["value"], want)
 		}
-		if !strings.Contains(html, `<dd class="value value-`+kind+`">`+want+"</dd>") {
+		// The value is the dd's whole text; a gauge container may follow it.
+		if !strings.Contains(html, `<dd class="value value-`+kind+`">`+want+"<") {
 			t.Errorf("rendered page does not show %q for %q", want, kind)
 		}
 	}
@@ -413,6 +414,71 @@ func TestRenderReportSections(t *testing.T) {
 	}
 	if strings.Contains(html, "innerHTML") {
 		t.Errorf("report script must not use innerHTML")
+	}
+
+	// Summary chart inputs parse back with their formatted texts, and every
+	// chart has its container: inline in its row, or after its rows.
+	summary := data["summary"].(map[string]any)
+	if d := summary["distinct"].(map[string]any); d["distinct"] != float64(s.Distinct) || d["count"] != float64(s.Count) {
+		t.Errorf("summary distinct = %v", d)
+	}
+	center := summary["center"].(map[string]any)
+	var centerKeys []string
+	for _, m := range center["marks"].([]any) {
+		mark := m.(map[string]any)
+		centerKeys = append(centerKeys, mark["key"].(string))
+		if mark["key"] == "mean" && mark["text"] != formatFloat(s.Mean) {
+			t.Errorf("mean mark text = %v, want %s", mark["text"], formatFloat(s.Mean))
+		}
+	}
+	if got := strings.Join(centerKeys, ","); strings.Contains(got, "ema") || !strings.HasPrefix(got, "mean,") {
+		t.Errorf("center marks = %s; EMA must not be drawn", got)
+	}
+	if ci := center["ci"].(map[string]any); ci["text"] != wantValues["ci95"] {
+		t.Errorf("center CI text = %v, want %s", ci["text"], wantValues["ci95"])
+	}
+	if n := len(summary["ladder"].([]any)); n != 6 {
+		t.Errorf("ladder has %d rungs, want 6 (Q1, Q3, p10, p90, p95, p99)", n)
+	}
+	if len(summary["range"].([]any)) != 5 {
+		t.Errorf("range strip should have 5 marks")
+	}
+	for _, name := range []string{"skewness", "kurtosis", "cv"} {
+		g := summary[name].(map[string]any)
+		if g["na"] != nil || g["reading"] != wantReadings[name] {
+			t.Errorf("%s gauge = %v", name, g)
+		}
+	}
+	for _, kind := range []string{"distinct", "skewness", "kurtosis", "cv"} {
+		if !strings.Contains(html, `<div class="chart chart-inline" data-chart="`+kind+`"></div></dd>`) {
+			t.Errorf("row %q has no inline chart container", kind)
+		}
+	}
+	for _, name := range []string{"range", "center", "box", "ladder"} {
+		if strings.Count(html, `<div class="chart" data-chart="`+name+`"></div>`) != 1 {
+			t.Errorf("expected exactly one %q chart container", name)
+		}
+	}
+	// The box plot and ladder sit right after the IQR row, before skewness.
+	iqr, box, skew := strings.Index(html, `value-iqr"`), strings.Index(html, `data-chart="box"`), strings.Index(html, `value-skewness"`)
+	if !(iqr < box && box < skew) {
+		t.Errorf("box plot container is not between the IQR and skewness rows")
+	}
+}
+
+// TestRenderReportGaugeNA checks through the rendered page that undefined
+// gauges carry their N/A reasons for a two-value dataset and a zero-mean one.
+func TestRenderReportGaugeNA(t *testing.T) {
+	_, html := renderTestReport(t, []float64{4, 9}, nil, 0, 0, 0)
+	summary := reportJSON(t, html)["summary"].(map[string]any)
+	for name, want := range map[string]string{"skewness": "requires at least 3 values", "kurtosis": "requires at least 4 values"} {
+		if g := summary[name].(map[string]any); g["na"] != want || g["text"] != nil {
+			t.Errorf("n=2: %s gauge = %v, want N/A %q", name, g, want)
+		}
+	}
+	_, html = renderTestReport(t, []float64{-2, -1, 1, 2}, nil, 0, 0, 0)
+	if cv := reportJSON(t, html)["summary"].(map[string]any)["cv"].(map[string]any); cv["na"] != "mean near zero" {
+		t.Errorf("zero mean: CV gauge = %v", cv)
 	}
 }
 

@@ -89,6 +89,7 @@ type reportData struct {
 	Sections []reportSection `json:"sections"`
 	Footnote string          `json:"footnote,omitempty"`
 	Charts   chartData       `json:"charts"`
+	Summary  summaryCharts   `json:"summary"`
 }
 
 // reportPage is the value passed to the report template. CSS and JS carry
@@ -277,6 +278,7 @@ func buildReportPage(s *Stats, data []float64, inputArg string, now time.Time, n
 		Stats:    newReportStats(s, logTransformed),
 		Sections: newReportSections(s),
 		Charts:   newChartData(data, s),
+		Summary:  newSummaryCharts(s, numBins),
 	}
 	if s.TrimDatasetPct > 0 {
 		report.Footnote = trimFootnote

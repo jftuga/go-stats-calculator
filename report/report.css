@@ -12,6 +12,26 @@
   --banner-bg: #fff8c5;
   --banner-border: #d4a72c;
   --shadow: 0 6px 24px rgba(31, 35, 40, 0.18);
+  --warn: #9a6700;
+
+  /* Charts. Marker identity is carried by shape and label; color only helps. */
+  --chart-axis: #59636e;
+  --chart-line: #8c959f;
+  --chart-fill: #0969da;
+  --chart-fill-soft: rgba(9, 105, 218, 0.18);
+  --chart-shade: rgba(9, 105, 218, 0.08);
+  --chart-dup: #bf8700;
+  --chart-halo: #ffffff;
+  --band-ok: #b7e4c7;
+  --band-mid: #fde2a7;
+  --band-high: #f7c1bd;
+  --band-na: #e6eaef;
+  --mk-mean: #0969da;
+  --mk-median: #1a7f37;
+  --mk-mode: #8250df;
+  --mk-geomean: #bc4c00;
+  --mk-trimmedmean: #bf3989;
+  --ci: rgba(9, 105, 218, 0.35);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -28,6 +48,25 @@
     --banner-bg: #2e2a1a;
     --banner-border: #9e6a03;
     --shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
+    --warn: #d29922;
+
+    --chart-axis: #9198a1;
+    --chart-line: #656c76;
+    --chart-fill: #4493f8;
+    --chart-fill-soft: rgba(68, 147, 248, 0.25);
+    --chart-shade: rgba(68, 147, 248, 0.1);
+    --chart-dup: #d29922;
+    --chart-halo: #151b23;
+    --band-ok: #1f4d2e;
+    --band-mid: #5a4513;
+    --band-high: #6e2a26;
+    --band-na: #262c36;
+    --mk-mean: #4493f8;
+    --mk-median: #3fb950;
+    --mk-mode: #ab7df8;
+    --mk-geomean: #f0883e;
+    --mk-trimmedmean: #f778ba;
+    --ci: rgba(68, 147, 248, 0.45);
   }
 }
 
@@ -208,6 +247,202 @@ body {
 
 .footnote {
   color: var(--muted);
+}
+
+/* Charts: SVG is built by report.js at the container's width. */
+.charts {
+  display: grid;
+  gap: 1rem;
+  margin: 0.75rem 0;
+}
+
+.chart-figure {
+  margin: 0;
+  min-width: 0;
+}
+
+.chart-title {
+  margin: 0 0 0.3rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.chart {
+  min-width: 0;
+  font: 0.85rem/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.chart-inline {
+  max-width: 32rem;
+  margin-top: 0.35rem;
+}
+
+.chart svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+  font: 11px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.chart text {
+  fill: var(--fg);
+  pointer-events: none;
+}
+
+.chart .halo {
+  paint-order: stroke;
+  stroke: var(--chart-halo);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.chart .muted {
+  fill: var(--muted);
+}
+
+.chart-note,
+.chart-reason {
+  margin: 0.3rem 0 0;
+  color: var(--muted);
+}
+
+.chart-warning {
+  margin: 0.3rem 0 0;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.axis line {
+  stroke: var(--chart-axis);
+  stroke-width: 1;
+}
+
+.axis text {
+  fill: var(--chart-axis);
+}
+
+.guide {
+  stroke: var(--chart-line);
+  stroke-width: 1;
+  fill: none;
+}
+
+.leader {
+  stroke: var(--chart-line);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+
+.grid {
+  stroke: var(--rule);
+  stroke-width: 1;
+}
+
+.shade {
+  fill: var(--chart-shade);
+}
+
+.seg-distinct,
+.box,
+.strip-box {
+  fill: var(--chart-fill-soft);
+  stroke: var(--chart-fill);
+  stroke-width: 1;
+}
+
+.seg-dup {
+  fill: var(--chart-dup);
+  fill-opacity: 0.55;
+  stroke: var(--chart-dup);
+  stroke-width: 1;
+}
+
+.whisker,
+.strip-line,
+.strip-tick {
+  stroke: var(--fg);
+  stroke-width: 1.25;
+}
+
+.median-line {
+  stroke: var(--fg);
+  stroke-width: 2.5;
+}
+
+.fence {
+  stroke: var(--chart-axis);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.dot {
+  fill: var(--chart-fill);
+  fill-opacity: 0.6;
+  stroke: var(--chart-fill);
+  stroke-width: 1;
+}
+
+.ci-band {
+  fill: var(--ci);
+  stroke: var(--chart-fill);
+  stroke-width: 1;
+}
+
+.modal-bin {
+  fill: none;
+  stroke: var(--mk-mode);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 2;
+}
+
+.marker {
+  stroke: var(--card-bg);
+  stroke-width: 1;
+}
+
+.mk-mean { fill: var(--mk-mean); }
+.mk-median { fill: var(--mk-median); }
+.mk-mode { fill: var(--mk-mode); }
+.mk-geomean { fill: var(--mk-geomean); }
+.mk-trimmedmean { fill: var(--mk-trimmedmean); }
+
+.hit {
+  fill: transparent;
+}
+
+.band-ok { fill: var(--band-ok); }
+.band-mid { fill: var(--band-mid); }
+.band-high { fill: var(--band-high); }
+.band-na { fill: var(--band-na); }
+
+.needle {
+  stroke: var(--fg);
+  stroke-width: 2;
+}
+
+.needle-head {
+  fill: var(--fg);
+}
+
+.chart-tip {
+  box-sizing: border-box;
+  position: fixed;
+  z-index: 10;
+  max-width: min(18rem, calc(100vw - 16px));
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  background: var(--card-bg);
+  color: var(--fg);
+  box-shadow: var(--shadow);
+  font: 0.8rem/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
+
+.chart-tip div:first-child {
+  font-weight: 600;
 }
 
 @media (max-width: 34rem) {

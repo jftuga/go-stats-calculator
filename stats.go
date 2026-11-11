@@ -973,12 +973,24 @@ func interpretAutocorrelation(r float64) string {
 	return "strong " + direction + " serial dependence"
 }
 
+// Band thresholds for interpretSkewness, interpretKurtosis and interpretCV.
+// The report's gauges draw their bands from these, so a band always means
+// what the reading says.
+const (
+	skewModerate = 0.5
+	skewHigh     = 1.0
+	kurtosisLow  = -1.0
+	kurtosisHigh = 1.0
+	cvModerate   = 15.0
+	cvHigh       = 30.0
+)
+
 // interpretKurtosis provides a human-readable label for a kurtosis value.
 func interpretKurtosis(k float64) string {
-	if k < -1 {
+	if k < kurtosisLow {
 		return "Platykurtic - flat, thin tails"
 	}
-	if k <= 1 {
+	if k <= kurtosisHigh {
 		return "Mesokurtic - normal-like"
 	}
 	return "Leptokurtic - peaked, heavy tails"
@@ -986,10 +998,10 @@ func interpretKurtosis(k float64) string {
 
 // interpretCV provides a human-readable label for a coefficient of variation value.
 func interpretCV(cv float64) string {
-	if cv < 15 {
+	if cv < cvModerate {
 		return "Low Variability"
 	}
-	if cv < 30 {
+	if cv < cvHigh {
 		return "Moderate Variability"
 	}
 	return "High Variability"
@@ -1035,10 +1047,10 @@ func formatFloatSlice(values []float64) string {
 // interpretSkewness provides a human-readable label for a skewness value.
 func interpretSkewness(s float64) string {
 	absS := math.Abs(s)
-	if absS < 0.5 {
+	if absS < skewModerate {
 		return "Fairly Symmetrical"
 	}
-	if absS < 1.0 {
+	if absS < skewHigh {
 		if s > 0 {
 			return "Moderately Right Skewed"
 		}
