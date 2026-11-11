@@ -22,7 +22,7 @@ const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
 
-const PgmVersion string = "1.14.0"
+const PgmVersion string = "1.15.0"
 
 // madScale is the normal-consistency constant that makes the MAD directly
 // comparable to the standard deviation for normally distributed data.

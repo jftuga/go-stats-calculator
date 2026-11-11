@@ -1,5 +1,5 @@
 
-stats: stats.go html.go report/*
+stats: *.go report/*
 	go build -ldflags="-s -w" -o stats
 
 clean:

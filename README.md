@@ -48,6 +48,7 @@ The calculator computes the following statistics:
 -   **Geometric Mean**: The correct average for ratios, growth rates, index values, and normalized measurements. Shown only when all values are positive; suppressed under `-l` because the arithmetic mean of log-transformed values already is the log of the geometric mean.
 -   **Autocorrelation and Input Order**: Lag-1 autocorrelation measures whether each value predicts the next, and the input-order line reports whether data arrived ascending, descending, constant, or unordered. Besides the trendline and EMA, these are the only statistics in the program sensitive to input order. Both are suppressed under `-T`.
 -   **JSON Output**: Emit every computed value as a single JSON object with the `-j` flag, for piping into `jq` or any other tool.
+-   **HTML Report**: Write a standalone HTML page beside the input with the `--html` flag: every statistic in the same four sections, with charts, a definition behind each label, and a day/night and page-width switch. Tested from 1 to 1,000,000 values, the report stays a few hundred kilobytes.
 
 All numeric output uses full decimal notation (no scientific notation) with trailing zeros trimmed for readability. The number of decimal places adapts to the magnitude of each value, so small numbers keep their significant digits rather than rounding away to `0`:
 
@@ -460,7 +461,49 @@ Warnings about skipped lines still go to stderr, so stdout is always valid JSON 
 | `inputOrder`, `trendline` | Empty strings under `-T`, where sorting destroyed the input order. |
 | `customPercentiles` | Present only when `-p` was used; keys are the requested percentiles as strings. |
 
-### 12. Version
+### 12. HTML Report
+
+Use the `--html` flag (or `-html`) to also write a standalone HTML report that visualizes the statistics. The text or JSON output still goes to stdout unchanged; the report is an extra file.
+
+**Syntax:**
+```bash
+./stats --html <filename>
+```
+
+**Examples:**
+```bash
+# Writes data.html next to data.txt
+./stats --html data.txt
+
+# Writes stats--20261111.143005.html in the current directory
+cat data.txt | ./stats --html
+
+# Combine with any other flag; the report reflects them
+./stats --html -l -z 2 -p "10,90" -e 20 latency.txt
+./stats --html -j data.txt | jq '.p95'
+```
+
+<!-- Screenshot placeholder: add a screenshot of a report here. -->
+
+**The output file:**
+
+- The report is written beside the input with its extension replaced: `/path/data.txt` becomes `/path/data.html`. A name with no extension, or a leading-dot name such as `.data`, gets `.html` appended.
+- Reading from stdin (no file, or `-`) writes `stats--YYYYmmdd.HHMMSS.html` in the current directory, named from the local time. Two stdin runs within the same second write the same name, so the second overwrites the first.
+- An existing report is overwritten, except when the report would be the input itself (for example `./stats --html report.html`, or a symlink, hard link or case variant of the same file); the program then exits 1 and leaves the file alone. An argument with no file name to build on, such as `.` or `dir/`, also exits 1.
+- The report is written to a temporary file and renamed into place, so a failed run never leaves a truncated report or destroys the previous one.
+- The report is written before anything is printed to stdout, so a downstream `head` closing the pipe cannot stop it, and a write failure exits 1 before anything reaches stdout. `HTML report written to <absolute path>` is printed to stderr after the output, following an empty line.
+
+**What the report contains:**
+
+- The same four sections as the text output (Descriptive Statistics, Measures of Central Tendency, Measures of Spread & Distribution, Distribution), with values formatted exactly as in the text output.
+- Charts: a range strip, a number line of the centers with the 95% confidence interval, a box plot, a percentile ladder, gauges for skewness, kurtosis and CV, a histogram with an adjustable bin count and a normal curve, an ECDF, a normal Q-Q plot, a trendline in input order (with the EMA under `-e`), and a lag-1 plot that switches to a density grid above 5,000 pairs. A chart with nothing to draw says why.
+- Click any statistic's name for a short definition, its formula and, where the program has one, a reading of this dataset's value.
+- The upper right holds a day/night switch (the page follows the OS until you choose) and Normal, Wide and Full width options. Both choices are remembered by the browser. The controls are hidden when printing, and the page always prints in the light colors.
+- Under `-l`, every axis and tooltip showing a data value says `ln(value)`.
+
+The page is a single file with no external resources: it never touches the network and needs nothing installed to open. The raw data is not embedded; the program embeds bounded summaries, so a million values still give a report of a few hundred kilobytes. It needs a browser from 2024 or later (Chrome 123, Safari 17.5, Firefox 125); in older browsers the page loses its colors, the charts their lines, and the definitions may not open.
+
+### 13. Version
 
 Use the `-v` flag to print the program version, project URL, and disclaimer, then exit. It is handled before any other flag is validated, so it always works.
 
