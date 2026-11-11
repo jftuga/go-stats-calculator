@@ -100,6 +100,7 @@ type reportPage struct {
 	Input          string
 	Generated      string
 	Version        string
+	URL            string
 	Options        []reportOption
 	LogTransformed bool
 	TrimDatasetPct string // empty when -T is not active
@@ -301,6 +302,7 @@ func buildReportPage(s *Stats, inputArg string, now time.Time, numBins int, logT
 		Input:          input,
 		Generated:      now.Format("2006-01-02 15:04:05 MST"),
 		Version:        PgmVersion,
+		URL:            PgmUrl,
 		Options:        reportOptions(s, numBins, logTransformed),
 		LogTransformed: logTransformed,
 		TrimOrigN:      s.TrimDatasetOrigN,

@@ -55,6 +55,11 @@ body {
   color: var(--muted);
 }
 
+.meta a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;

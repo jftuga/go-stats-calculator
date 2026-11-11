@@ -251,7 +251,7 @@ func TestRenderReportHeader(t *testing.T) {
 	for _, want := range []string{
 		"a&lt;b&gt;.txt",
 		"2026-11-10 14:30:05 UTC",
-		PgmVersion,
+		`<a href="` + PgmUrl + `" target="_blank" rel="noopener noreferrer">stats ` + PgmVersion + `</a>`,
 		`<li class="chip">-k 2</li>`,
 		`<li class="chip">-b 20</li>`,
 		`<li class="chip">-z 2.5</li>`,

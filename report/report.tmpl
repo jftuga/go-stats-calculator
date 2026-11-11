@@ -10,7 +10,7 @@
 <main class="report">
 <header class="report-header">
 <h1>{{.Input}}</h1>
-<p class="meta">Generated {{.Generated}} by stats {{.Version}}</p>
+<p class="meta">Generated {{.Generated}} by <a href="{{.URL}}" target="_blank" rel="noopener noreferrer">stats {{.Version}}</a></p>
 {{- if .Options}}
 <ul class="chips" aria-label="Active options">
 {{- range .Options}}
