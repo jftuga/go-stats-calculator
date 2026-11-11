@@ -197,23 +197,31 @@ function padDomain(lo, hi, fraction) {
   return [lo - pad, hi + pad];
 }
 
-// Reports whether lo and hi differ by more than floating-point noise, so a
-// span of a few ulps (ten copies of 0.1 have a mean just under 0.1) is not
-// drawn as a meaningful range.
+// The tolerance hasSpan allows, as a multiple of Number.EPSILON times the
+// magnitude: 4 to 8 ulps. Interpolating between equal values is off by at most
+// about 1.5 ulps per percentile, so 3 between two of them.
+const SPAN_ULPS = 4;
+
+// Reports whether lo and hi differ by more than interpolation noise, so such a
+// span is not drawn as a range. At 1e15 (an ulp of 0.125) a spread of 1 is
+// still a range.
 function hasSpan(lo, hi) {
-  return hi - lo > 1e-12 * Math.max(Math.abs(lo), Math.abs(hi));
+  return hi - lo > SPAN_ULPS * Number.EPSILON * Math.max(Math.abs(lo), Math.abs(hi));
 }
 
 // Returns about count tick values on [lo, hi] at a step of 1, 2 or 5 times a
 // power of ten, and at least minStep (1 keeps counts and positions whole).
-// Values are i * step so they do not accumulate rounding error.
+// Values are i * step so they do not accumulate rounding error. The step is
+// also at least a few ulps of the magnitude: on a range of one or two ulps a
+// finer step makes lo / step pass 2^53, where i++ stops changing i.
 function niceTicks(lo, hi, count, minStep) {
-  const raw = (hi - lo) / Math.max(1, count);
+  const ulpFloor = SPAN_ULPS * Number.EPSILON * Math.max(Math.abs(lo), Math.abs(hi));
+  const raw = Math.max((hi - lo) / Math.max(1, count), ulpFloor, Number.MIN_VALUE);
   const magnitude = 10 ** Math.floor(Math.log10(raw));
   const norm = raw / magnitude;
   const step = Math.max((norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * magnitude, minStep || 0);
   const values = [];
-  for (let i = Math.ceil(lo / step); i * step <= hi + step * 1e-9; i++) {
+  for (let i = Math.ceil(lo / step); i * step <= hi + step * 1e-9 && values.length <= count + 2; i++) {
     values.push(i * step);
   }
   return { values, step };
@@ -745,7 +753,11 @@ function drawCenterLine({ el, data, width, motion }) {
   }
   const lo = Math.min(...xs);
   const hi = Math.max(...xs);
-  if (!hasSpan(lo, hi)) {
+  // Means carry summation error that grows with n (1,000 copies of 0.1 have a
+  // mean about 100 ulps off), so whether there is spread is decided from the
+  // data's min and max, which every center lies between: with real spread the
+  // CI band and modal bin give the line a true width.
+  if (!hasSpan(data.stats.min, data.stats.max) || !(hi > lo)) {
     showReason(el, `every center is ${valueText(data, c.marks[0].text)}`);
     return;
   }
