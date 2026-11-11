@@ -125,9 +125,10 @@ func TestHTMLSameFileRefusal(t *testing.T) {
 		if err == nil {
 			t.Errorf("%s: expected exit 1, got success", input)
 		}
-		want, _ := htmlOutputPath(input, time.Now())
-		if !strings.Contains(stderr, input) || !strings.Contains(stderr, want) {
-			t.Errorf("%s: error should name both paths, got: %s", input, stderr)
+		output, _ := htmlOutputPath(input, time.Now())
+		want := "Error: not writing the HTML report: " + output + " would overwrite the input file " + input + "\n"
+		if stderr != want {
+			t.Errorf("%s: stderr = %q, want %q", input, stderr, want)
 		}
 		if stdout != "" {
 			t.Errorf("%s: expected no stdout before refusal, got: %s", input, stdout)
@@ -166,8 +167,21 @@ func TestHTMLMarshalFailure(t *testing.T) {
 	}
 }
 
+// resolvedPath returns path with symlinks resolved (macOS temp directories
+// sit behind /var -> /private/var), so two spellings of one file compare equal.
+func resolvedPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("resolving %s: %v", path, err)
+	}
+	return resolved
+}
+
 // TestHTMLReportCLI checks that --html writes a parseable report for a file
-// argument and for stdin, and leaves stdout identical to a run without it.
+// argument and for stdin, announces it on stderr by its absolute path after
+// the stdout output and an empty line, and leaves stdout identical to a run
+// without it.
 func TestHTMLReportCLI(t *testing.T) {
 	data, err := os.ReadFile("test_data.txt")
 	if err != nil {
@@ -181,16 +195,21 @@ func TestHTMLReportCLI(t *testing.T) {
 
 	cases := []struct {
 		name  string
+		dir   string // working directory; empty means a fresh temp directory
 		args  []string
 		stdin string
 	}{
-		{"file text", []string{input}, ""},
-		{"file json", []string{"-j", input}, ""},
-		{"stdin text", nil, string(data)},
-		{"stdin dash json", []string{"-j", "-"}, string(data)},
+		{"file text", "", []string{input}, ""},
+		{"file json", "", []string{"-j", input}, ""},
+		{"relative file", dir, []string{"data.txt"}, ""},
+		{"stdin text", "", nil, string(data)},
+		{"stdin dash json", "", []string{"-j", "-"}, string(data)},
 	}
 	for _, tc := range cases {
-		runDir := t.TempDir()
+		runDir := tc.dir
+		if runDir == "" {
+			runDir = t.TempDir()
+		}
 		plain, _, err := runStatsIn(t, runDir, tc.stdin, tc.args...)
 		if err != nil {
 			t.Fatalf("%s: run without --html failed: %v", tc.name, err)
@@ -203,17 +222,39 @@ func TestHTMLReportCLI(t *testing.T) {
 			t.Errorf("%s: stdout changed with --html:\n--- without\n%s\n--- with\n%s", tc.name, plain, withHTML)
 		}
 
-		path, found := strings.CutPrefix(strings.TrimSpace(stderr), "HTML report written to ")
+		path, found := strings.CutPrefix(strings.TrimSuffix(stderr, "\n"), "\nHTML report written to ")
 		if !found {
-			t.Fatalf("%s: missing report note on stderr: %q", tc.name, stderr)
+			t.Fatalf("%s: stderr is not an empty line and the report note: %q", tc.name, stderr)
 		}
+
+		// With stdout and stderr on one pipe, the note comes last, after the
+		// complete text or JSON output and an empty line.
+		combined := exec.Command(statsBin, append([]string{"--html"}, tc.args...)...)
+		combined.Dir = runDir
+		combined.Stdin = strings.NewReader(tc.stdin)
+		both, err := combined.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: combined run failed: %v\n%s", tc.name, err, both)
+		}
+		// The stdin report name carries the time, so only its shape is compared.
+		note, found := strings.CutPrefix(string(both), plain+"\nHTML report written to ")
+		if !found || !strings.HasSuffix(note, ".html\n") || strings.Count(note, "\n") != 1 {
+			t.Errorf("%s: combined output does not end with an empty line and the note:\n%s", tc.name, both)
+		}
+		if !filepath.IsAbs(path) {
+			t.Fatalf("%s: report path %q is not absolute", tc.name, path)
+		}
+		wantDir := dir
 		if tc.stdin != "" {
-			if !strings.HasPrefix(path, "stats--") || filepath.Dir(path) != "." {
-				t.Errorf("%s: stdin report path = %q, want stats--<time>.html in the current directory", tc.name, path)
+			if !strings.HasPrefix(filepath.Base(path), "stats--") {
+				t.Errorf("%s: stdin report path = %q, want stats--<time>.html", tc.name, path)
 			}
-			path = filepath.Join(runDir, path)
-		} else if path != filepath.Join(dir, "data.html") {
-			t.Errorf("%s: report path = %q, want %q", tc.name, path, filepath.Join(dir, "data.html"))
+			wantDir = runDir
+		} else if filepath.Base(path) != "data.html" {
+			t.Errorf("%s: report path = %q, want data.html", tc.name, path)
+		}
+		if got := resolvedPath(t, filepath.Dir(path)); got != resolvedPath(t, wantDir) {
+			t.Errorf("%s: report directory = %q, want %q", tc.name, got, resolvedPath(t, wantDir))
 		}
 
 		page, err := os.ReadFile(path)

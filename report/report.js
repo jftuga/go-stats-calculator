@@ -148,9 +148,28 @@ function finishSvg(svg, width, height) {
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
 }
 
-// Shows a one-line reason in place of a chart that has nothing to draw.
-function showReason(container, text) {
-  htmlEl(container, "p", "chart-reason", text);
+// The name each chart goes by in the line that replaces it, keyed by its
+// data-chart name.
+const CHART_NAMES = {
+  distinct: "Duplicate bar",
+  range: "Range strip",
+  center: "Number line",
+  box: "Box plot",
+  ladder: "Percentile ladder",
+  skewness: "Skewness gauge",
+  kurtosis: "Kurtosis gauge",
+  cv: "CV gauge",
+  histogram: "Histogram",
+  ecdf: "ECDF",
+  qq: "Q-Q plot",
+  trendline: "Trendline",
+  lag: "Lag-1 plot",
+};
+
+// Shows "<Chart> not shown: <reason>." in place of the chart of container (a
+// [data-chart] element) when it has nothing to draw.
+function showReason(container, reason) {
+  htmlEl(container, "p", "chart-reason", `${CHART_NAMES[container.dataset.chart]} not shown: ${reason}.`);
 }
 
 // Adds a line of explanation under a chart; warning lines are emphasized.
@@ -210,9 +229,42 @@ function trimZeros(text) {
   return text.replace(/\.?0+$/, "");
 }
 
-// Uses a true minus sign for generated labels.
+// Uses a true minus sign (U+2212) for a number shown in a chart.
 function minusSign(text) {
-  return text.replace("-", "−");
+  return text.replaceAll("-", "−");
+}
+
+// Gives every number Go preformats for the charts (each "text" field of the
+// summary and distribution payloads, all formatFloat output) a true minus
+// sign, like the labels the page formats itself. The table is rendered by the
+// template from its own copy, so it keeps the text output's hyphen.
+function useMinusSigns(node) {
+  for (const [key, value] of Object.entries(node)) {
+    if (key === "text" && typeof value === "string") {
+      node[key] = minusSign(value);
+    } else if (value && typeof value === "object") {
+      useMinusSigns(value);
+    }
+  }
+}
+
+// Names a data value on an axis: ln(value) under -l (the flag behind the
+// header's -l chip and banner), so a logged value is never read as raw.
+function valueName(data) {
+  return data.stats.logTransformed ? "ln(value)" : "value";
+}
+
+// Labels a data value's text in a tooltip: "ln(value) 2.3026" under -l,
+// otherwise word and the text ("value 10"), or the text alone with no word.
+function valueText(data, text, word) {
+  const name = data.stats.logTransformed ? valueName(data) : word;
+  return name ? `${name} ${text}` : text;
+}
+
+// Qualifies data values quoted in a chart note: ", as ln(value)" under -l,
+// otherwise nothing.
+function lnSuffix(data) {
+  return data.stats.logTransformed ? `, as ${valueName(data)}` : "";
 }
 
 // Unit suffixes for large tick values, largest first.
@@ -274,18 +326,19 @@ function tickLabels(values, step, maxAbs) {
 }
 
 // Formats a value the way Go's formatFloat does: 4 decimals from magnitude 1
-// up, one more per leading zero below that, trailing zeros trimmed. Used only
-// for values Go does not send as text (fences, whiskers, bin centers).
+// up, one more per leading zero below that, trailing zeros trimmed, with a
+// true minus sign. Used only for values Go does not send as text (fences,
+// whiskers, bin centers).
 function formatValue(v) {
   if (Number.isInteger(v)) {
-    return v.toFixed(0);
+    return minusSign(v.toFixed(0));
   }
   const a = Math.abs(v);
   const decimals = a >= 1 ? 4 : 4 - Math.floor(Math.log10(a)) - 1;
   if (decimals > MAX_VALUE_DECIMALS) {
     return exponentText(v, 3);
   }
-  return trimZeros(v.toFixed(decimals));
+  return minusSign(trimZeros(v.toFixed(decimals)));
 }
 
 // Draws a horizontal axis at y for scale: a baseline, ticks and labels kept
@@ -323,9 +376,24 @@ function drawAxis(svg, scale, y, width, minStep) {
     if (base === null) {
       return y + 20;
     }
-    svgText(g, r0, y + 29, `ticks are offsets from ${minusSign(formatValue(base))}`, { class: "muted" });
+    svgText(g, r0, y + 29, `ticks are offsets from ${formatValue(base)}`, { class: "muted" });
     return y + 34;
   }
+}
+
+// Draws a horizontal axis's title right-aligned at x under its labels, which
+// end at bottom. Returns the y below the title.
+function axisTitle(svg, x, bottom, text) {
+  svgText(svg, x, bottom + 10, text, { class: "muted", "text-anchor": "end" });
+  return bottom + 14;
+}
+
+// Draws the value axis of a chart that has no axis title (number line, box
+// plot, ladder). Under -l it gains an ln(value) title, so its ticks are not
+// read as raw values. Returns the y below everything drawn.
+function drawValueAxis(svg, data, scale, y, width) {
+  const bottom = drawAxis(svg, scale, y, width);
+  return data.stats.logTransformed ? axisTitle(svg, scale.range[1], bottom, valueName(data)) : bottom;
 }
 
 // ===== Chart kit: label lanes =============================================
@@ -531,7 +599,7 @@ function renderMount(mount, data, animate) {
     mount.draw({ el: mount.el, data, width, motion, name: mount.el.dataset.chart });
   } catch (err) {
     mount.el.replaceChildren();
-    showReason(mount.el, "This chart could not be drawn.");
+    showReason(mount.el, "drawing it failed");
     console.error(err);
     return;
   }
@@ -599,7 +667,7 @@ function drawDistinctBar({ el, data, width, motion }) {
 function drawRangeStrip({ el, data, width, motion }) {
   const marks = data.summary.range;
   if (!marks) {
-    showReason(el, "No range to draw: every value is the same.");
+    showReason(el, "every value is the same");
     return;
   }
   const m = Object.fromEntries(marks.map((mark) => [mark.key, mark]));
@@ -616,12 +684,12 @@ function drawRangeStrip({ el, data, width, motion }) {
     width: Math.max(1, x(m.q3.value) - x(m.q1.value)),
     height: 14,
   });
-  addTooltip(box, ["Q1 to Q3", `[${m.q1.text}, ${m.q3.text}]`, "The middle half of the values"]);
+  addTooltip(box, ["Q1 to Q3", valueText(data, `[${m.q1.text}, ${m.q3.text}]`), "The middle half of the values"]);
   for (const mark of marks) {
     const mx = x(mark.value);
     const reach = mark.key === "median" ? 11 : 7;
     svgEl(strip, "line", { class: mark.key === "median" ? "median-line" : "strip-tick", x1: mx, x2: mx, y1: y - reach, y2: y + reach });
-    addTooltip(svgEl(strip, "rect", { class: "hit", x: mx - 5, y: y - 12, width: 10, height: 24 }), [mark.label, mark.text]);
+    addTooltip(svgEl(strip, "rect", { class: "hit", x: mx - 5, y: y - 12, width: 10, height: 24 }), [mark.label, valueText(data, mark.text)]);
   }
   growIn(motion, strip, x(m.min.value), y);
 
@@ -633,7 +701,9 @@ function drawRangeStrip({ el, data, width, motion }) {
   positionLabels(items, leaders, y + 12, (lane) => top + lane * LANE_HEIGHT);
   fadeIn(motion, leaders, 450);
   fadeIn(motion, labels, 450);
-  finishSvg(svg, width, top + (lanes - 1) * LANE_HEIGHT + 6);
+  const bottom = top + (lanes - 1) * LANE_HEIGHT + 6;
+  // The strip has no axis, so under -l its labels need their own title.
+  finishSvg(svg, width, data.stats.logTransformed ? axisTitle(svg, width, bottom, valueName(data)) : bottom);
 }
 
 // ===== Section 2: Measures of Central Tendency ============================
@@ -676,7 +746,7 @@ function drawCenterLine({ el, data, width, motion }) {
   const lo = Math.min(...xs);
   const hi = Math.max(...xs);
   if (!hasSpan(lo, hi)) {
-    showReason(el, `Nothing to compare: every center is ${c.marks[0].text}.`);
+    showReason(el, `every center is ${valueText(data, c.marks[0].text)}`);
     return;
   }
 
@@ -709,7 +779,7 @@ function drawCenterLine({ el, data, width, motion }) {
   const s0 = clamp(x(q.low), r0, r1);
   const s1 = clamp(x(q.high), r0, r1);
   const shade = svgEl(shadeLayer, "rect", { class: "shade", x: s0, y: lineY - 14, width: Math.max(2, s1 - s0), height: axisY - lineY + 14 });
-  addTooltip(shade, [q.label, q.text]);
+  addTooltip(shade, [q.label, valueText(data, q.text)]);
   const clipped = x(q.low) < r0 || x(q.high) > r1;
 
   svgEl(lineLayer, "line", { class: "guide", x1: r0, x2: r1, y1: lineY, y2: lineY });
@@ -720,7 +790,7 @@ function drawCenterLine({ el, data, width, motion }) {
     ciWidened = trueWidth < MIN_CI_WIDTH;
     const w = Math.max(trueWidth, MIN_CI_WIDTH);
     const band = svgEl(lineLayer, "rect", { class: "ci-band", x: mid - w / 2, y: lineY - 8, width: w, height: 16 });
-    addTooltip(band, ["95% CI (mean)", c.ci.text, ciWidened ? "Drawn at a minimum width; the true band is narrower" : ""]);
+    addTooltip(band, ["95% CI (mean)", valueText(data, c.ci.text), ciWidened ? "Drawn at a minimum width; the true band is narrower" : ""]);
     growIn(motion, band, mid, lineY);
   }
   if (c.modalBin) {
@@ -728,7 +798,7 @@ function drawCenterLine({ el, data, width, motion }) {
     const bx = x(b.low);
     const bin = svgEl(lineLayer, "rect", { class: "modal-bin", x: bx, y: lineY - 6, width: Math.max(2, x(b.high) - bx), height: 12 });
     const valueWord = b.count === 1 ? "value" : "values";
-    addTooltip(bin, ["Modal bin", b.text, `${b.count} ${valueWord}, the densest of ${b.bins} equal-width bins (-b)`, "From the -b binning, so it need not match the histogram's tallest bar"]);
+    addTooltip(bin, ["Modal bin", valueText(data, b.text), `${b.count} ${valueWord}, the densest of ${b.bins} equal-width bins (-b)`, "From the -b binning, so it need not match the histogram's tallest bar"]);
     fadeIn(motion, bin, 300);
   }
 
@@ -739,19 +809,19 @@ function drawCenterLine({ el, data, width, motion }) {
     const outer = svgEl(markLayer, "g", { transform: `translate(${mx}, ${lineY})` });
     const inner = svgEl(outer, "g");
     centerMarker(inner, mark.key);
-    addTooltip(svgEl(inner, "circle", { class: "hit", r: 9 }), [mark.label, mark.text]);
+    addTooltip(svgEl(inner, "circle", { class: "hit", r: 9 }), [mark.label, valueText(data, mark.text)]);
     slideIn(motion, inner, medianX - mx);
   }
 
-  const bottom = drawAxis(svg, x, axisY, width);
+  const bottom = drawValueAxis(svg, data, x, axisY, width);
   finishSvg(svg, width, bottom + 2);
 
-  showNote(el, `Shaded: Q1 to Q3, ${q.text}${clipped ? ", wider than this view" : ""}.`);
+  showNote(el, `Shaded: Q1 to Q3, ${q.text}${lnSuffix(data)}${clipped ? ", wider than this view" : ""}.`);
   if (ciWidened) {
     showNote(el, "The 95% CI is narrower than a pixel at this scale, so its band is drawn at a minimum width.");
   }
   if (c.modeCount > 1) {
-    showNote(el, `Mode not drawn: the data has ${c.modeCount} modes, listed in the Mode row.`);
+    showNote(el, `Mode not shown: the data has ${c.modeCount} modes, listed in the Mode row.`);
   }
 }
 
@@ -764,7 +834,11 @@ function drawBoxPlot({ el, data, width, motion }) {
   const b = data.charts.box;
   const s = data.stats;
   if (!b) {
-    showReason(el, s.min === s.max ? "No box plot: every value is the same." : "No box plot: no value lies inside the fences.");
+    // Go also drops the box when -k is so large that a fence overflows to
+    // infinity; then every value is inside the fences, not none.
+    const k = s.iqrMultiplier;
+    const overflow = !Number.isFinite(s.q1 - k * s.iqr) || !Number.isFinite(s.q3 + k * s.iqr);
+    showReason(el, s.min === s.max ? "every value is the same" : overflow ? `-k ${formatValue(k)} puts the fences beyond the largest representable number` : "no value lies inside the fences");
     return;
   }
   const k = formatValue(s.iqrMultiplier);
@@ -797,7 +871,7 @@ function drawBoxPlot({ el, data, width, motion }) {
       lastLabel = label;
       lastEnd = lx + half;
     }
-    addTooltip(svgEl(svg, "rect", { class: "hit", x: fx - 4, y: y - 20, width: 8, height: 40 }), [name, formatValue(value), rule]);
+    addTooltip(svgEl(svg, "rect", { class: "hit", x: fx - 4, y: y - 20, width: 8, height: 40 }), [name, valueText(data, formatValue(value)), rule]);
   }
 
   const box = svgEl(svg, "g");
@@ -811,10 +885,10 @@ function drawBoxPlot({ el, data, width, motion }) {
   ]) {
     svgEl(box, "line", { class: "whisker", x1: from, x2: to, y1: y, y2: y });
     svgEl(box, "line", { class: "whisker", x1: cap, x2: cap, y1: y - 8, y2: y + 8 });
-    addTooltip(svgEl(box, "rect", { class: "hit", x: Math.min(from, to), y: y - 8, width: Math.max(8, Math.abs(to - from)), height: 16 }), [name, formatValue(value), `The ${where}`]);
+    addTooltip(svgEl(box, "rect", { class: "hit", x: Math.min(from, to), y: y - 8, width: Math.max(8, Math.abs(to - from)), height: 16 }), [name, valueText(data, formatValue(value)), `The ${where}`]);
   }
   const rect = svgEl(box, "rect", { class: "box", x: q1x, y: y - 14, width: Math.max(2, q3x - q1x), height: 28 });
-  addTooltip(rect, ["Box: Q1 to Q3", `[${formatValue(b.q1)}, ${formatValue(b.q3)}]`, `Median ${formatValue(b.median)}`]);
+  addTooltip(rect, ["Box: Q1 to Q3", valueText(data, `[${formatValue(b.q1)}, ${formatValue(b.q3)}]`), `Median ${valueText(data, formatValue(b.median))}`]);
   const mx = x(b.median);
   svgEl(box, "line", { class: "median-line", x1: mx, x2: mx, y1: y - 14, y2: y + 14 });
   growIn(motion, box, mx, y);
@@ -826,24 +900,24 @@ function drawBoxPlot({ el, data, width, motion }) {
     const count = o.counts[i];
     const r = maxCount > 1 ? 2.5 + 3.5 * Math.sqrt(count / maxCount) : 3;
     const dot = svgEl(dots, "circle", { class: "dot", cx: x(v), cy: y, r });
-    const valueWord = count === 1 ? "value" : "values";
-    const lines = o.binned ? [`Outliers near ${formatValue(v)}`, `${count} ${valueWord} in this bin`] : ["Outlier", formatValue(v), count > 1 ? `${count} values` : ""];
+    const at = valueText(data, formatValue(v));
+    const lines = o.binned ? [`${plural(count, "outlier")} near ${at}`] : ["Outlier", at, count > 1 ? `${count} values` : ""];
     addTooltip(dot, lines);
   });
   fadeIn(motion, dots, 450);
 
-  const bottom = drawAxis(svg, x, y + 28, width);
+  const bottom = drawValueAxis(svg, data, x, y + 28, width);
   finishSvg(svg, width, bottom + 2);
 
-  showNote(el, `Whiskers end at the most extreme values inside the fences, ${k} × IQR beyond the quartiles: [${formatValue(b.lowerFence)}, ${formatValue(b.upperFence)}].`);
+  showNote(el, `Whiskers end at the most extreme values inside the fences, ${k} × IQR beyond the quartiles: [${formatValue(b.lowerFence)}, ${formatValue(b.upperFence)}]${lnSuffix(data)}.`);
   const total = o.counts.reduce((a, c) => a + c, 0);
   if (total === 0) {
     showNote(el, "No IQR outliers.");
   } else if (o.binned) {
-    showNote(el, `${total} outliers, binned into ${o.values.length} positions; dot size shows how many values each holds.`);
+    showNote(el, `${total} IQR outliers, binned into ${o.values.length} positions; dot size shows how many values each holds.`);
   } else {
     const repeats = maxCount > 1 ? "; larger dots are repeated values" : "";
-    showNote(el, `${total} ${total === 1 ? "outlier" : "outliers"} drawn as dots${repeats}.`);
+    showNote(el, `${plural(total, "IQR outlier")} drawn as dots${repeats}.`);
   }
 }
 
@@ -855,7 +929,7 @@ function drawLadder({ el, data, width, motion }) {
   const lo = Math.min(...values);
   const hi = Math.max(...values);
   if (!hasSpan(lo, hi)) {
-    showReason(el, `Nothing to compare: every percentile is ${rungs[0].text}.`);
+    showReason(el, `every percentile is ${valueText(data, rungs[0].text)}`);
     return;
   }
   const svg = newSvg(el, width);
@@ -878,7 +952,7 @@ function drawLadder({ el, data, width, motion }) {
     labels[i].setAttribute("y", cy + 4);
     svgEl(grid, "line", { class: "grid", x1: r0, x2: width - CHART_MARGIN, y1: cy, y2: cy });
     const dot = svgEl(dots, "circle", { class: "dot", cx, cy, r: 4.5 });
-    addTooltip(dot, [rung.label, rung.text]);
+    addTooltip(dot, [rung.label, valueText(data, rung.text)]);
     slideIn(motion, dot, r0 - cx, i * 60);
     const value = svgText(texts, cx + 8, cy + 4, rung.text, { class: "halo" });
     if (cx + 8 + textWidth(value) > width) {
@@ -890,7 +964,7 @@ function drawLadder({ el, data, width, motion }) {
   const line = svgEl(path, "polyline", { class: "guide", points: points.join(" ") });
   fadeIn(motion, line, 600);
 
-  const bottom = drawAxis(svg, x, top + rowHeight * rungs.length + 4, width);
+  const bottom = drawValueAxis(svg, data, x, top + rowHeight * rungs.length + 4, width);
   finishSvg(svg, width, bottom + 2);
 }
 
@@ -947,7 +1021,7 @@ function drawGauge({ el, data, width, motion, name }) {
   const trackY = 18;
   const trackH = 16;
   const na = Boolean(g.na);
-  const unitText = (v) => minusSign(formatValue(v)) + spec.unit;
+  const unitText = (v) => formatValue(v) + spec.unit;
 
   const bands = spec.bands(g.thresholds);
   for (const [from, to, label, tone, closed] of bands) {
@@ -992,11 +1066,11 @@ function drawGauge({ el, data, width, motion, name }) {
   } else {
     svgEl(inner, "path", { class: "needle-head", d: `M-4,${trackY - 6}L4,${trackY - 6}L0,${trackY - 1}Z` });
   }
-  const valueText = off ? `${g.text} (off scale)` : g.text;
-  addTooltip(svgEl(inner, "rect", { class: "hit", x: -6, y: trackY - 8, width: 12, height: trackH + 12 }), [spec.title, valueText, g.reading]);
+  const gaugeText = off ? `${g.text} (off scale)` : g.text;
+  addTooltip(svgEl(inner, "rect", { class: "hit", x: -6, y: trackY - 8, width: 12, height: trackH + 12 }), [spec.title, gaugeText, g.reading]);
   slideIn(motion, inner, x(clamp(0, e0, e1)) - nx);
 
-  const label = svgText(svg, nx, trackY - 8, valueText, { class: "halo", "text-anchor": "middle" });
+  const label = svgText(svg, nx, trackY - 8, gaugeText, { class: "halo", "text-anchor": "middle" });
   const half = textWidth(label) / 2;
   label.setAttribute("x", clamp(nx, half, width - half));
   fadeIn(motion, label, 500);
@@ -1075,11 +1149,10 @@ function plotFrame(svg, width, xDomain, yDomain, options) {
 function finishPlot(el, svg, frame, width, xTitle, minStep) {
   let bottom = drawAxis(svg, frame.x, frame.bottom, width, minStep);
   if (xTitle) {
-    svgText(svg, frame.right, bottom + 10, xTitle, { class: "muted", "text-anchor": "end" });
-    bottom += 14;
+    bottom = axisTitle(svg, frame.right, bottom, xTitle);
   }
   if (frame.yBase !== null) {
-    showNote(el, `Vertical ticks are offsets from ${minusSign(formatValue(frame.yBase))}.`);
+    showNote(el, `Vertical ticks are offsets from ${formatValue(frame.yBase)}.`);
   }
   return bottom;
 }
@@ -1144,7 +1217,7 @@ function showLegend(container, entries) {
 // Formats a value range for a tooltip, closed on the right only for the last
 // bin, which holds the maximum.
 function rangeText(lo, hi, last) {
-  return `[${minusSign(formatValue(lo))}, ${minusSign(formatValue(hi))}${last ? "]" : ")"}`;
+  return `[${formatValue(lo)}, ${formatValue(hi)}${last ? "]" : ")"}`;
 }
 
 // Returns "1 value" or "n values" with the given noun.
@@ -1173,7 +1246,7 @@ function shapeChartReason(s, needsSD) {
 // suppressed under -T, or too few values (minCount), no spread or zero SD.
 function orderChartReason(s, minCount) {
   if (s.trimDatasetPct > 0) {
-    return "-T sorts the data before computing, so input order is lost";
+    return "-T sorts the data, so order-based charts are meaningless";
   }
   if (s.count < minCount) {
     return `it needs at least ${minCount} values`;
@@ -1211,7 +1284,7 @@ let histogramBins = 0;
 function drawHistogram({ el, data, width, motion }) {
   const h = data.charts.histogram;
   if (!h) {
-    showReason(el, `No histogram: ${shapeChartReason(data.stats, false)}.`);
+    showReason(el, shapeChartReason(data.stats, false));
     return;
   }
   if (!h.offered.includes(histogramBins)) {
@@ -1298,16 +1371,16 @@ function drawHistogramBins(el, data, count, width, motion) {
     const i = clamp(Math.floor(((px - f.left) / (f.right - f.left)) * count), 0, count - 1);
     const lo = h.min + i * binWidth;
     const hi = i === count - 1 ? h.max : lo + binWidth;
-    return [rangeText(lo, hi, i === count - 1), plural(bars[i], "value")];
+    return [valueText(data, rangeText(lo, hi, i === count - 1)), plural(bars[i], "value")];
   });
-  finishSvg(svg, width, finishPlot(el, svg, f, width, "value") + 2);
+  finishSvg(svg, width, finishPlot(el, svg, f, width, valueName(data)) + 2);
 
   if (!showCurve) {
-    showNote(el, "No normal curve: the standard deviation is 0.");
+    showNote(el, "Normal curve not shown: the standard deviation is 0.");
     return;
   }
   const clipped = peak > yMax * 1.05 ? "; its peak is above the top of the chart" : "";
-  showNote(el, `Curve: the normal distribution with this data's mean (${centerMark(data, "mean").text}) and SD (${data.distribution.stdDev.text}), scaled to the bars${clipped}.`);
+  showNote(el, `Curve: the normal distribution with this data's mean (${centerMark(data, "mean").text}) and SD (${data.distribution.stdDev.text})${data.stats.logTransformed ? ` of ${valueName(data)}` : ""}, scaled to the bars${clipped}.`);
 }
 
 // Draws the ECDF as a step line (every value up to 1,000) or a line through
@@ -1316,7 +1389,7 @@ function drawHistogramBins(el, data, count, width, motion) {
 function drawECDF({ el, data, width, motion }) {
   const e = data.charts.ecdf;
   if (!e) {
-    showReason(el, `No ECDF: ${shapeChartReason(data.stats, false)}.`);
+    showReason(el, shapeChartReason(data.stats, false));
     return;
   }
   const v = e.values;
@@ -1382,11 +1455,11 @@ function drawECDF({ el, data, width, motion }) {
       svgEl(leaders, "line", { class: "leader", x1: cx, y1: cy, x2: clamp(cx, lx, lx + w), y2: ly < cy ? ly + 2 : ly - 10 });
     }
     const dot = svgEl(markLayer, "circle", { class: "mark-dot", cx, cy, r: 3.5 });
-    const shareText = exact ? `${atOrBelow} of ${v.length} values lie at or below it` : `${minusSign(formatValue(m.p))}% of the values lie at or below it`;
-    addTooltip(dot, [m.label, m.text, shareText]);
+    const shareText = exact ? `${atOrBelow} of ${v.length} values lie at or below it` : `${formatValue(m.p)}% of the values lie at or below it`;
+    addTooltip(dot, [m.label, valueText(data, m.text), shareText]);
   }
   fadeIn(motion, markLayer, 900);
-  finishSvg(svg, width, finishPlot(el, svg, f, width, "value") + 2);
+  finishSvg(svg, width, finishPlot(el, svg, f, width, valueName(data)) + 2);
   if (e.mode === "quantiles") {
     showNote(el, `Drawn through ${v.length} quantiles at 0.1% steps of the ${data.stats.count} values.`);
   }
@@ -1415,7 +1488,7 @@ function countAtOrBelow(sorted, x) {
 function drawQQ({ el, data, width, motion }) {
   const q = data.charts.qq;
   if (!q) {
-    showReason(el, `No Q-Q plot: ${shapeChartReason(data.stats, true)}.`);
+    showReason(el, shapeChartReason(data.stats, true));
     return;
   }
   const svg = newSvg(el, width);
@@ -1441,12 +1514,12 @@ function drawQQ({ el, data, width, motion }) {
   addPlotTooltip(svg, f, (px, py) => {
     const a = anchors.find(([, value, z]) => Math.abs(f.x(value) - px) <= 5 && Math.abs(f.y(z) - py) <= 5);
     if (a) {
-      return [`${a[0]}, a point of the reference line`, `value ${minusSign(formatValue(a[1]))}, z = ${minusSign(a[2].toFixed(4))}`];
+      return [`${a[0]}, a point of the reference line`, `${valueText(data, formatValue(a[1]), "value")}, z = ${minusSign(a[2].toFixed(4))}`];
     }
     const i = nearestPoint(xs, ys, px, py);
-    return i < 0 ? null : [`Value ${minusSign(formatValue(q.x[i]))}`, `normal quantile z = ${minusSign(q.z[i].toFixed(3))}`];
+    return i < 0 ? null : [valueText(data, formatValue(q.x[i]), "Value"), `normal quantile z = ${minusSign(q.z[i].toFixed(3))}`];
   });
-  finishSvg(svg, width, finishPlot(el, svg, f, width, "value") + 2);
+  finishSvg(svg, width, finishPlot(el, svg, f, width, valueName(data)) + 2);
   showNote(el, "Points along the line mean the values follow a normal distribution; the line runs through Q1 and Q3 (squares).");
   if (q.x.length < data.stats.count) {
     showNote(el, `Showing ${q.x.length} of the ${data.stats.count} sorted values, spaced evenly in z so both tails are included.`);
@@ -1472,14 +1545,14 @@ function drawTrendline({ el, data, width, motion }) {
   const t = data.charts.trendline;
   const s = data.stats;
   if (!t) {
-    showReason(el, `No trendline: ${orderChartReason(s, 2)}.`);
+    showReason(el, orderChartReason(s, 2));
     return;
   }
   const n = s.count;
   const raw = t.mode === "raw";
   const points = []; // one per raw value or bucket: position, value lines
   if (raw) {
-    t.values.forEach((value, i) => points.push({ pos: i + 1, y: value, emaPos: i + 1, ema: t.ema && t.ema[i], lines: [`Position ${i + 1}`, `value ${minusSign(formatValue(value))}`] }));
+    t.values.forEach((value, i) => points.push({ pos: i + 1, y: value, emaPos: i + 1, ema: t.ema && t.ema[i], lines: [`Position ${i + 1}`, valueText(data, formatValue(value), "value")] }));
   } else {
     t.mean.forEach((mean, i) => {
       const [start, end] = trendBounds(i, n, t.mean.length);
@@ -1490,12 +1563,12 @@ function drawTrendline({ el, data, width, motion }) {
         ema: t.ema && t.ema[i],
         lo: t.min[i],
         hi: t.max[i],
-        lines: [`Positions ${start + 1} to ${end}`, `mean ${minusSign(formatValue(mean))}`, `min ${minusSign(formatValue(t.min[i]))}, max ${minusSign(formatValue(t.max[i]))}`],
+        lines: [`Positions ${start + 1} to ${end}`, `mean ${valueText(data, formatValue(mean))}`, `min ${valueText(data, formatValue(t.min[i]))}, max ${valueText(data, formatValue(t.max[i]))}`],
       });
     });
   }
   const svg = newSvg(el, width);
-  const f = plotFrame(svg, width, [1, Math.max(2, n)], padDomain(s.min, s.max, 0.05), { title: "value" });
+  const f = plotFrame(svg, width, [1, Math.max(2, n)], padDomain(s.min, s.max, 0.05), { title: valueName(data) });
   const reveal = svgEl(svg, "g");
   if (!raw) {
     const upper = points.map((p) => `${f.x(p.pos)},${f.y(p.hi)}`);
@@ -1527,7 +1600,7 @@ function drawTrendline({ el, data, width, motion }) {
       }
     });
     const p = points[best];
-    return t.ema ? p.lines.concat(`EMA ${minusSign(formatValue(p.ema))} at position ${p.emaPos}`) : p.lines;
+    return t.ema ? p.lines.concat(`EMA ${valueText(data, formatValue(p.ema))} at position ${p.emaPos}`) : p.lines;
   });
   finishSvg(svg, width, finishPlot(el, svg, f, width, "input position", 1) + 2);
 
@@ -1537,7 +1610,7 @@ function drawTrendline({ el, data, width, motion }) {
   }
   legend.push(["sw-mean", "Mean"]);
   if (t.ema) {
-    legend.push(["sw-ema", `${data.distribution.ema.label}, ending at ${data.distribution.ema.text}`]);
+    legend.push(["sw-ema", `${data.distribution.ema.label}, ending at ${data.distribution.ema.text}${lnSuffix(data)}`]);
   }
   showLegend(el, legend);
   if (!raw) {
@@ -1580,13 +1653,13 @@ function drawLag({ el, data, width, motion }) {
   const l = data.charts.lag;
   const s = data.stats;
   if (!l) {
-    showReason(el, `No lag-1 plot: ${orderChartReason(s, 3)}.`);
+    showReason(el, orderChartReason(s, 3));
     return;
   }
   const grid = l.mode === "grid" ? l.grid : null;
   const domain = grid ? [grid.min, grid.max] : padDomain(s.min, s.max, 0.03);
   const svg = newSvg(el, width);
-  const f = plotFrame(svg, width, domain, domain, { title: "next value", square: true, height: clamp(width - 80, 160, LAG_MAX_SIDE) });
+  const f = plotFrame(svg, width, domain, domain, { title: `next ${valueName(data)}`, square: true, height: clamp(width - 80, 160, LAG_MAX_SIDE) });
   svgEl(svg, "line", { class: "leader", x1: f.x(domain[0]), y1: f.y(domain[0]), x2: f.x(domain[1]), y2: f.y(domain[1]) });
   const layer = svgEl(svg, "g");
   let pick;
@@ -1607,7 +1680,7 @@ function drawLag({ el, data, width, motion }) {
       const col = clamp(Math.floor(((px - f.left) / (f.right - f.left)) * size), 0, size - 1);
       const row = clamp(Math.floor(((f.bottom - py) / (f.bottom - f.top)) * size), 0, size - 1);
       const c = grid.counts[row * size + col];
-      return [plural(c, "pair"), `value in ${rangeText(grid.min + col * cell, grid.min + (col + 1) * cell, col === size - 1)}`, `next in ${rangeText(grid.min + row * cell, grid.min + (row + 1) * cell, row === size - 1)}`];
+      return [plural(c, "pair"), `${valueName(data)} in ${rangeText(grid.min + col * cell, grid.min + (col + 1) * cell, col === size - 1)}`, `next ${valueText(data, `in ${rangeText(grid.min + row * cell, grid.min + (row + 1) * cell, row === size - 1)}`)}`];
     };
   } else {
     const v = l.values;
@@ -1618,12 +1691,12 @@ function drawLag({ el, data, width, motion }) {
     xs.forEach((cx, i) => svgEl(layer, "circle", { class: "dot lag-dot", cx, cy: ys[i], r, "fill-opacity": opacity }));
     pick = (px, py) => {
       const i = nearestPoint(xs, ys, px, py);
-      return i < 0 ? null : [`Positions ${i + 1} and ${i + 2}`, `value ${minusSign(formatValue(v[i]))}`, `next ${minusSign(formatValue(v[i + 1]))}`];
+      return i < 0 ? null : [`Positions ${i + 1} and ${i + 2}`, valueText(data, formatValue(v[i]), "value"), `next ${valueText(data, formatValue(v[i + 1]))}`];
     };
   }
   fadeIn(motion, layer, 200);
   addPlotTooltip(svg, f, pick);
-  let bottom = finishPlot(el, svg, f, width, "value");
+  let bottom = finishPlot(el, svg, f, width, valueName(data));
 
   if (grid) {
     // Legend: swatches for real counts, each in the shade a cell with that
@@ -1679,5 +1752,7 @@ const CHART_DRAWERS = {
 };
 
 const reportData = loadReportData();
+useMinusSigns(reportData.summary);
+useMinusSigns(reportData.distribution);
 initDefinitions();
 mountCharts(reportData, CHART_DRAWERS);

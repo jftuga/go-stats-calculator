@@ -297,12 +297,14 @@ func main() {
 
 	// The report is written before stdout, so a downstream "head" closing the
 	// pipe cannot prevent it, and a write failure never follows a full report.
+	// The note announcing it is deferred to follow the text or JSON output,
+	// after an empty line.
 	if *htmlOutput {
 		if err := writeHTMLReport(htmlPath, stats, numbers, inputArg, now, *numBins, *logTransform); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Fprintf(os.Stderr, "HTML report written to %s\n", htmlPath)
+		defer fmt.Fprintf(os.Stderr, "\n%s\n", reportWrittenNote(htmlPath))
 	}
 
 	if *jsonOutput {

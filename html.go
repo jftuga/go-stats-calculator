@@ -143,9 +143,19 @@ func checkNotSameFile(inputPath, outputPath string) error {
 		return nil // opening the input reports this error
 	}
 	if os.SameFile(inInfo, outInfo) {
-		return fmt.Errorf("HTML report path %s is the input file %s", outputPath, inputPath)
+		return fmt.Errorf("not writing the HTML report: %s would overwrite the input file %s", outputPath, inputPath)
 	}
 	return nil
+}
+
+// reportWrittenNote returns the stderr line announcing the report at path,
+// made absolute so it can be opened from any directory. Abs fails only when
+// the working directory cannot be found; the path is then shown as given.
+func reportWrittenNote(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	return "HTML report written to " + path
 }
 
 // reportOptions lists the options that differ from their defaults, in the
