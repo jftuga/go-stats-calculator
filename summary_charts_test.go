@@ -114,24 +114,29 @@ func TestSummaryCenter(t *testing.T) {
 // that a -p 25 merges into the Q1 rung.
 func TestSummaryLadder(t *testing.T) {
 	s, sc := summaryFor(t, testData, []float64{99.5, 25, 10, 95}, 0, 16)
-	if got := markKeys(sc.Ladder); got != "p10,p25,p75,p95,p99,p99.5" {
+	keys := make([]chartMark, len(sc.Ladder))
+	for i, m := range sc.Ladder {
+		keys[i] = m.chartMark
+	}
+	if got := markKeys(keys); got != "p10,p25,p75,p95,p99,p99.5" {
 		t.Fatalf("ladder keys = %s", got)
 	}
 	want := map[string]struct {
 		label string
+		p     float64
 		value float64
 	}{
-		"p10":   {"p10", s.CustomPercentiles[10]},
-		"p25":   {"Q1 (p25)", s.Q1},
-		"p75":   {"Q3 (p75)", s.Q3},
-		"p95":   {"p95", s.P95},
-		"p99":   {"p99", s.P99},
-		"p99.5": {"p99.5", s.CustomPercentiles[99.5]},
+		"p10":   {"p10", 10, s.CustomPercentiles[10]},
+		"p25":   {"Q1 (p25)", 25, s.Q1},
+		"p75":   {"Q3 (p75)", 75, s.Q3},
+		"p95":   {"p95", 95, s.P95},
+		"p99":   {"p99", 99, s.P99},
+		"p99.5": {"p99.5", 99.5, s.CustomPercentiles[99.5]},
 	}
 	for _, m := range sc.Ladder {
 		w := want[m.Key]
-		if m.Label != w.label || m.Value != w.value || m.Text != formatFloat(w.value) {
-			t.Errorf("rung %s = %+v, want label %q value %v", m.Key, m, w.label, w.value)
+		if m.Label != w.label || m.P != w.p || m.Value != w.value || m.Text != formatFloat(w.value) {
+			t.Errorf("rung %s = %+v, want label %q p %v value %v", m.Key, m, w.label, w.p, w.value)
 		}
 	}
 }

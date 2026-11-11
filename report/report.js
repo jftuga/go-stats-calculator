@@ -5,7 +5,7 @@
 // with createElementNS and textContent only (no markup is ever parsed from a
 // string), so no value or file name can be interpreted as markup. Sections, in order: shared helpers,
 // definitions, the chart kit (SVG, scales, axes, labels, tooltip, animation,
-// mounting), the charts of report sections 1 to 3, and startup.
+// mounting, x-y plots), the charts of report sections 1 to 4, and startup.
 
 // ===== Shared helpers =====================================================
 
@@ -186,12 +186,13 @@ function hasSpan(lo, hi) {
 }
 
 // Returns about count tick values on [lo, hi] at a step of 1, 2 or 5 times a
-// power of ten. Values are i * step so they do not accumulate rounding error.
-function niceTicks(lo, hi, count) {
+// power of ten, and at least minStep (1 keeps counts and positions whole).
+// Values are i * step so they do not accumulate rounding error.
+function niceTicks(lo, hi, count, minStep) {
   const raw = (hi - lo) / Math.max(1, count);
   const magnitude = 10 ** Math.floor(Math.log10(raw));
   const norm = raw / magnitude;
-  const step = (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * magnitude;
+  const step = Math.max((norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * magnitude, minStep || 0);
   const values = [];
   for (let i = Math.ceil(lo / step); i * step <= hi + step * 1e-9; i++) {
     values.push(i * step);
@@ -222,13 +223,30 @@ const TICK_UNITS = [
   [1e3, "k"],
 ];
 
+// Most decimals a tick or value is written with before switching to
+// exponent notation (toFixed rejects more than 100; values near 1e-170 have
+// spread).
+const MAX_TICK_DECIMALS = 12;
+const MAX_VALUE_DECIMALS = 100;
+
+// Formats v in exponent notation with digits after the point, trailing zeros
+// of the mantissa trimmed: 1.5e-170.
+function exponentText(v, digits) {
+  const [mantissa, exponent] = v.toExponential(digits).split("e");
+  return `${trimZeros(mantissa)}e${exponent}`.replaceAll("-", "−");
+}
+
 // Formats an axis tick with just enough decimals for its step. Large values
 // with a coarse step use a k, M, B or T suffix when that needs at most two
 // decimals; otherwise every digit is kept, and drawAxis switches to offsets
-// when the result is too long.
+// when the result is too long. A step too fine for plain decimals gives
+// exponent notation with enough digits to tell neighboring ticks apart.
 function formatTick(v, step, maxAbs) {
   if (v === 0) {
     return "0";
+  }
+  if (-Math.log10(step) > MAX_TICK_DECIMALS) {
+    return exponentText(v, clamp(Math.ceil(Math.log10(Math.abs(v) / step)), 0, 20));
   }
   if (step >= 1e3 && maxAbs >= 1e5) {
     const [unit, suffix] = TICK_UNITS.find(([u]) => maxAbs >= u);
@@ -264,19 +282,22 @@ function formatValue(v) {
   }
   const a = Math.abs(v);
   const decimals = a >= 1 ? 4 : 4 - Math.floor(Math.log10(a)) - 1;
-  return trimZeros(v.toFixed(Math.min(decimals, 100)));
+  if (decimals > MAX_VALUE_DECIMALS) {
+    return exponentText(v, 3);
+  }
+  return trimZeros(v.toFixed(decimals));
 }
 
 // Draws a horizontal axis at y for scale: a baseline, ticks and labels kept
 // inside the SVG, with a note under the labels when they are offsets. Ticks
-// are thinned to every other one until no two labels overlap. Returns the y
-// just below the labels or the note.
-function drawAxis(svg, scale, y, width) {
+// are thinned to every other one until no two labels overlap, and are at
+// least minStep apart. Returns the y just below the labels or the note.
+function drawAxis(svg, scale, y, width, minStep) {
   const [r0, r1] = scale.range;
   const [d0, d1] = scale.domain;
   const g = svgEl(svg, "g", { class: "axis" });
   svgEl(g, "line", { x1: r0, x2: r1, y1: y, y2: y });
-  let { values, step } = niceTicks(d0, d1, Math.max(2, Math.floor((r1 - r0) / TICK_SPACING)));
+  let { values, step } = niceTicks(d0, d1, Math.max(2, Math.floor((r1 - r0) / TICK_SPACING)), minStep);
   const maxAbs = Math.max(Math.abs(d0), Math.abs(d1));
   for (;;) {
     const { texts, base } = tickLabels(values, step, maxAbs);
@@ -476,6 +497,18 @@ function growIn(motion, el, originX, originY, delay) {
 // Fades el in after delay milliseconds.
 function fadeIn(motion, el, delay) {
   motion.add(el, [{ opacity: 0 }, { opacity: 1 }], { duration: 350, delay: delay || 0 });
+}
+
+// Grows el vertically out of the point (originX, originY), for bars rising
+// from a baseline.
+function growUp(motion, el, originX, originY, delay) {
+  el.style.transformOrigin = `${originX}px ${originY}px`;
+  motion.add(el, [{ transform: "scaleY(0)" }, { transform: "scaleY(1)" }], { delay: delay || 0 });
+}
+
+// Uncovers el from left to right, for lines drawn in input order.
+function revealLeftToRight(motion, el, delay) {
+  motion.add(el, [{ clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)" }], { duration: 1400, easing: "ease-in-out", delay: delay || 0 });
 }
 
 // ===== Chart kit: mounting ================================================
@@ -973,6 +1006,659 @@ function drawGauge({ el, data, width, motion, name }) {
   }
 }
 
+// ===== Chart kit: x-y plots ===============================================
+
+const PLOT_HEIGHT = 200; // height of an x-y chart's plotting area
+const PLOT_TOP = 22; // room above the plot for the vertical axis title
+const Y_TICK_SPACING = 40; // target distance between vertical axis ticks
+const POINT_PICK_RADIUS = 12; // farthest a hovered point may be from the pointer
+
+// Creates the vertical axis of an x-y chart for domain [lo, hi] at about one
+// tick per Y_TICK_SPACING of height, and measures its labels so the plot can
+// start right of them. options.format replaces the tick text (base is then
+// null), options.minStep keeps ticks whole, options.title names the axis.
+// The grid group is created first so grid lines sit behind the data.
+function measureYAxis(svg, [lo, hi], height, options) {
+  const grid = svgEl(svg, "g");
+  const g = svgEl(svg, "g", { class: "axis" });
+  const { values, step } = niceTicks(lo, hi, Math.max(2, Math.floor(height / Y_TICK_SPACING)), options.minStep);
+  const maxAbs = Math.max(Math.abs(lo), Math.abs(hi));
+  const { texts, base } = options.format ? { texts: values.map(options.format), base: null } : tickLabels(values, step, maxAbs);
+  const labels = texts.map((text) => svgText(g, 0, 0, text, { "text-anchor": "end" }));
+  if (options.title) {
+    svgText(g, 0, PLOT_TOP - 8, options.title);
+  }
+  return { grid, g, values, labels, base, width: Math.max(0, ...labels.map(textWidth)) };
+}
+
+// Places a measured vertical axis at x = left for scale y, with a grid line
+// across the plot at each tick.
+function placeYAxis(axis, y, left, right) {
+  const [r0, r1] = y.range;
+  svgEl(axis.g, "line", { x1: left, x2: left, y1: r0, y2: r1 });
+  axis.values.forEach((v, i) => {
+    const py = y(v);
+    svgEl(axis.g, "line", { x1: left - 4, x2: left, y1: py, y2: py });
+    svgEl(axis.grid, "line", { class: "grid", x1: left, x2: right, y1: py, y2: py });
+    axis.labels[i].setAttribute("x", left - 7);
+    axis.labels[i].setAttribute("y", py + 4);
+  });
+}
+
+// Lays out an x-y chart in svg: the vertical axis for yDomain, then the
+// scales, with the plot right of the axis labels. options are those of
+// measureYAxis plus height (of the plot) and square (the plot is as wide as
+// it is high, never wider than the space available). Returns the scales and
+// the plot's edges; yBase is the offset base of the vertical ticks or null.
+function plotFrame(svg, width, xDomain, yDomain, options) {
+  const opts = options || {};
+  const height = opts.height || PLOT_HEIGHT;
+  const axis = measureYAxis(svg, yDomain, height, opts);
+  const left = Math.ceil(axis.width) + 10;
+  let right = width - CHART_MARGIN;
+  let plotHeight = height;
+  if (opts.square) {
+    plotHeight = Math.max(40, Math.min(height, right - left));
+    right = left + plotHeight;
+  }
+  const top = PLOT_TOP;
+  const bottom = top + plotHeight;
+  const x = linearScale(xDomain, [left, right]);
+  const y = linearScale(yDomain, [bottom, top]);
+  placeYAxis(axis, y, left, right);
+  return { x, y, left, right, top, bottom, yBase: axis.base };
+}
+
+// Draws the horizontal axis under a plot with an optional title, sets the
+// SVG's height, and notes when the vertical ticks are offsets. Returns the
+// y below everything drawn.
+function finishPlot(el, svg, frame, width, xTitle, minStep) {
+  let bottom = drawAxis(svg, frame.x, frame.bottom, width, minStep);
+  if (xTitle) {
+    svgText(svg, frame.right, bottom + 10, xTitle, { class: "muted", "text-anchor": "end" });
+    bottom += 14;
+  }
+  if (frame.yBase !== null) {
+    showNote(el, `Vertical ticks are offsets from ${minusSign(formatValue(frame.yBase))}.`);
+  }
+  return bottom;
+}
+
+// Counter for unique clip path ids; charts are redrawn on resize.
+let clipCount = 0;
+
+// Returns a clip-path reference that confines an element to the plot area.
+function clipToPlot(svg, frame) {
+  const id = `plot-clip-${++clipCount}`;
+  const clip = svgEl(svgEl(svg, "defs"), "clipPath", { id });
+  svgEl(clip, "rect", { x: frame.left, y: frame.top, width: frame.right - frame.left, height: frame.bottom - frame.top });
+  return `url(#${id})`;
+}
+
+// Covers the plot with one transparent target that shows the tooltip for
+// whatever is under the pointer: pick(px, py) receives SVG coordinates and
+// returns tooltip lines, or null to hide the tooltip. One target replaces
+// thousands of per-point listeners. Call it after drawing, so it is on top.
+function addPlotTooltip(svg, frame, pick) {
+  const hit = svgEl(svg, "rect", { class: "hit", x: frame.left, y: frame.top, width: frame.right - frame.left, height: frame.bottom - frame.top });
+  const update = (e) => {
+    const box = svg.getBoundingClientRect();
+    const k = box.width > 0 ? Number(svg.getAttribute("width")) / box.width : 1;
+    const lines = pick((e.clientX - box.left) * k, (e.clientY - box.top) * k);
+    if (lines) {
+      showTooltip(lines, e.clientX, e.clientY);
+    } else {
+      hideTooltip();
+    }
+  };
+  hit.addEventListener("pointerenter", update);
+  hit.addEventListener("pointermove", update);
+  hit.addEventListener("pointerleave", hideTooltip);
+}
+
+// Returns the index of the point (xs[i], ys[i]) nearest to (px, py) within
+// POINT_PICK_RADIUS, or -1.
+function nearestPoint(xs, ys, px, py) {
+  let best = -1;
+  let bestDist = POINT_PICK_RADIUS * POINT_PICK_RADIUS;
+  for (let i = 0; i < xs.length; i++) {
+    const d = (xs[i] - px) ** 2 + (ys[i] - py) ** 2;
+    if (d <= bestDist) {
+      best = i;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
+// Adds a legend under a chart: one entry per [swatch class, text].
+function showLegend(container, entries) {
+  const list = htmlEl(container, "ul", "legend");
+  for (const [swatch, text] of entries) {
+    const item = htmlEl(list, "li", "");
+    htmlEl(item, "span", `swatch ${swatch}`);
+    item.append(text);
+  }
+}
+
+// Formats a value range for a tooltip, closed on the right only for the last
+// bin, which holds the maximum.
+function rangeText(lo, hi, last) {
+  return `[${minusSign(formatValue(lo))}, ${minusSign(formatValue(hi))}${last ? "]" : ")"}`;
+}
+
+// Returns "1 value" or "n values" with the given noun.
+function plural(n, noun) {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
+// ===== Section 4: Distribution ============================================
+
+// Returns why a chart of the values' distribution (histogram, ECDF, Q-Q) has
+// no payload; needsSD adds the Q-Q plot's zero-SD condition.
+function shapeChartReason(s, needsSD) {
+  if (s.count < 2) {
+    return "it needs at least 2 values";
+  }
+  if (s.min === s.max) {
+    return "every value is the same";
+  }
+  if (needsSD && !(s.stdDev > 0)) {
+    return "the standard deviation is 0";
+  }
+  return "the range of the values is too large to draw";
+}
+
+// Returns why an input-order chart (trendline, lag-1) has no payload:
+// suppressed under -T, or too few values (minCount), no spread or zero SD.
+function orderChartReason(s, minCount) {
+  if (s.trimDatasetPct > 0) {
+    return "-T sorts the data before computing, so input order is lost";
+  }
+  if (s.count < minCount) {
+    return `it needs at least ${minCount} values`;
+  }
+  if (s.min === s.max) {
+    return "every value is the same";
+  }
+  if (!(s.stdDev > 0)) {
+    return "the standard deviation is 0";
+  }
+  return "the range of the values is too large to draw";
+}
+
+// Shows the text output's sort-order warning on an input-order chart when the
+// input arrived ascending or descending.
+function showSortWarning(el, data) {
+  const warning = data.distribution.sortWarning;
+  if (warning) {
+    showNote(el, `Input order is ${data.stats.inputOrder}: ${warning}.`, true);
+  }
+}
+
+// Returns the mark of a center (mean, median) by key.
+function centerMark(data, key) {
+  return data.summary.center.marks.find((m) => m.key === key);
+}
+
+// The histogram's bin count chosen on the slider, kept across redraws after
+// a resize; 0 until the first draw picks Go's default.
+let histogramBins = 0;
+
+// Draws the histogram with its bin-count slider. The slider steps by index
+// through the offered counts (divisors of 960 no larger than n, so every
+// count merges the fine bins exactly) and starts at Go's default.
+function drawHistogram({ el, data, width, motion }) {
+  const h = data.charts.histogram;
+  if (!h) {
+    showReason(el, `No histogram: ${shapeChartReason(data.stats, false)}.`);
+    return;
+  }
+  if (!h.offered.includes(histogramBins)) {
+    histogramBins = h.default;
+  }
+  const controls = htmlEl(el, "div", "hist-controls");
+  const label = htmlEl(controls, "label", "hist-label", "Bins");
+  const input = document.createElement("input");
+  input.type = "range";
+  input.min = "0";
+  input.max = String(h.offered.length - 1);
+  input.step = "1";
+  input.value = String(h.offered.indexOf(histogramBins));
+  label.appendChild(input);
+  const output = htmlEl(controls, "output", "hist-count");
+  const plot = htmlEl(el, "div", "");
+
+  const render = (renderMotion) => {
+    const text = `${plural(histogramBins, "bin")}${histogramBins === h.default ? " (default)" : ""}`;
+    output.textContent = text;
+    input.setAttribute("aria-valuetext", text);
+    plot.replaceChildren();
+    drawHistogramBins(plot, data, histogramBins, width, renderMotion);
+  };
+  input.addEventListener("input", () => {
+    histogramBins = h.offered[Number(input.value)];
+    hideTooltip();
+    render(createMotion(false));
+  });
+  render(motion);
+}
+
+// Merges the 960 fine bins into count bars (count divides 960).
+function mergeBins(fine, count) {
+  const group = fine.length / count;
+  const bars = new Array(count).fill(0);
+  fine.forEach((c, i) => {
+    bars[Math.floor(i / group)] += c;
+  });
+  return bars;
+}
+
+// Draws the histogram's bars for count bins, and the normal curve with the
+// data's mean and SD scaled to the bars: n times the bin width times the
+// normal density. The curve is omitted when the SD is 0, and clipped when its
+// peak would squash the bars.
+function drawHistogramBins(el, data, count, width, motion) {
+  const h = data.charts.histogram;
+  const s = data.stats;
+  const bars = mergeBins(h.counts, count);
+  const binWidth = (h.max - h.min) / count;
+  const barMax = Math.max(...bars);
+  const sd = s.stdDev;
+  const scaleFactor = s.count * binWidth / (sd * Math.sqrt(2 * Math.PI));
+  const curveAt = (v) => scaleFactor * Math.exp(-0.5 * ((v - s.mean) / sd) ** 2);
+  const peak = sd > 0 ? curveAt(clamp(s.mean, h.min, h.max)) : 0;
+  const showCurve = sd > 0 && Number.isFinite(peak);
+  const yMax = Math.max(barMax, showCurve ? Math.min(peak, barMax * 1.5) : 0);
+
+  const svg = newSvg(el, width);
+  const f = plotFrame(svg, width, [h.min, h.max], [0, yMax * 1.05], { minStep: 1, title: "count" });
+  const barLayer = svgEl(svg, "g");
+  bars.forEach((c, i) => {
+    const x0 = f.x(h.min + i * binWidth);
+    const x1 = i === count - 1 ? f.right : f.x(h.min + (i + 1) * binWidth);
+    const gap = x1 - x0 > 4 ? 1 : 0;
+    if (c > 0) {
+      svgEl(barLayer, "rect", { class: "bar", x: x0 + gap / 2, y: f.y(c), width: Math.max(0.5, x1 - x0 - gap), height: f.bottom - f.y(c) });
+    }
+  });
+  growUp(motion, barLayer, f.left, f.bottom);
+
+  if (showCurve) {
+    const points = [];
+    for (let px = f.left; px <= f.right + 1; px += 2) {
+      const v = h.min + ((Math.min(px, f.right) - f.left) / (f.right - f.left)) * (h.max - h.min);
+      points.push(`${Math.min(px, f.right)},${Math.max(f.y(curveAt(v)), f.top - 50)}`);
+    }
+    const curve = svgEl(svg, "polyline", { class: "normal-curve", points: points.join(" "), "clip-path": clipToPlot(svg, f) });
+    fadeIn(motion, curve, 450);
+  }
+
+  addPlotTooltip(svg, f, (px) => {
+    const i = clamp(Math.floor(((px - f.left) / (f.right - f.left)) * count), 0, count - 1);
+    const lo = h.min + i * binWidth;
+    const hi = i === count - 1 ? h.max : lo + binWidth;
+    return [rangeText(lo, hi, i === count - 1), plural(bars[i], "value")];
+  });
+  finishSvg(svg, width, finishPlot(el, svg, f, width, "value") + 2);
+
+  if (!showCurve) {
+    showNote(el, "No normal curve: the standard deviation is 0.");
+    return;
+  }
+  const clipped = peak > yMax * 1.05 ? "; its peak is above the top of the chart" : "";
+  showNote(el, `Curve: the normal distribution with this data's mean (${centerMark(data, "mean").text}) and SD (${data.distribution.stdDev.text}), scaled to the bars${clipped}.`);
+}
+
+// Draws the ECDF as a step line (every value up to 1,000) or a line through
+// the 1,001 quantiles at 0.1% steps, with Q1, the median, Q3, p95, p99 and
+// any -p percentiles marked at (value, p).
+function drawECDF({ el, data, width, motion }) {
+  const e = data.charts.ecdf;
+  if (!e) {
+    showReason(el, `No ECDF: ${shapeChartReason(data.stats, false)}.`);
+    return;
+  }
+  const v = e.values;
+  const svg = newSvg(el, width);
+  const f = plotFrame(svg, width, padDomain(v[0], v[v.length - 1], 0.02), [0, 1], {
+    format: (p) => `${Math.round(p * 100)}%`,
+    title: "share of values at or below",
+  });
+  let d = `M${f.left},${f.y(0)}`;
+  if (e.mode === "exact") {
+    v.forEach((value, i) => {
+      d += `H${f.x(value)}V${f.y((i + 1) / v.length)}`;
+    });
+  } else {
+    v.forEach((value, i) => {
+      d += `${i === 0 ? "H" + f.x(value) : ""}L${f.x(value)},${f.y(i / (v.length - 1))}`;
+    });
+  }
+  d += `H${f.right}`;
+  const line = svgEl(svg, "path", { class: "ecdf-line", d });
+  revealLeftToRight(motion, line);
+
+  // Marks: the ladder's percentiles plus the median, unless -p 50 gave it.
+  const marks = data.summary.ladder.map((m) => ({ label: m.label, text: m.text, value: m.value, p: m.p }));
+  if (!marks.some((m) => m.p === 50)) {
+    const median = centerMark(data, "median");
+    marks.push({ label: "Median", text: median.text, value: median.value, p: 50 });
+  }
+  marks.sort((a, b) => b.p - a.p);
+  const markLayer = svgEl(svg, "g");
+  const leaders = svgEl(markLayer, "g");
+  const placed = []; // label boxes already placed, as [left, top, right, bottom]
+  const clashes = (x0, baseline, w) => placed.some(([l, t, r, b]) => x0 < r + 3 && x0 + w > l - 3 && baseline - 10 < b && baseline + 1 > t);
+  // In exact mode a mark sits on the step at its value: percentiles
+  // interpolate between data values, so at small n the share of values at or
+  // below p99 can be far from 99% (2 of 3 at n = 3). The quantile mode's
+  // 0.1% steps put it within 0.1% of p.
+  const exact = e.mode !== "quantiles";
+  for (const m of marks) {
+    const atOrBelow = exact ? countAtOrBelow(v, m.value) : 0;
+    const share = exact ? atOrBelow / v.length : m.p / 100;
+    const cx = f.x(m.value);
+    const cy = f.y(share);
+    const label = svgText(markLayer, 0, 0, m.label, { class: "halo" });
+    const w = textWidth(label);
+    // A rising curve leaves the space above-left and below-right of a point
+    // empty: try above-left, then below-right, then push down from above-left.
+    const left = Math.max(f.left + 2, cx - 4 - w);
+    let [lx, ly] = [left, cy - 6];
+    if (clashes(lx, ly, w)) {
+      [lx, ly] = [Math.min(cx + 6, width - w), cy + 15];
+      if (clashes(lx, ly, w)) {
+        [lx, ly] = [left, cy - 6];
+        while (clashes(lx, ly, w)) {
+          ly += 11;
+        }
+      }
+    }
+    label.setAttribute("x", lx);
+    label.setAttribute("y", ly);
+    placed.push([lx, ly - 10, lx + w, ly + 1]);
+    if (ly - cy > 20 || cy - ly > 14) {
+      svgEl(leaders, "line", { class: "leader", x1: cx, y1: cy, x2: clamp(cx, lx, lx + w), y2: ly < cy ? ly + 2 : ly - 10 });
+    }
+    const dot = svgEl(markLayer, "circle", { class: "mark-dot", cx, cy, r: 3.5 });
+    const shareText = exact ? `${atOrBelow} of ${v.length} values lie at or below it` : `${minusSign(formatValue(m.p))}% of the values lie at or below it`;
+    addTooltip(dot, [m.label, m.text, shareText]);
+  }
+  fadeIn(motion, markLayer, 900);
+  finishSvg(svg, width, finishPlot(el, svg, f, width, "value") + 2);
+  if (e.mode === "quantiles") {
+    showNote(el, `Drawn through ${v.length} quantiles at 0.1% steps of the ${data.stats.count} values.`);
+  }
+}
+
+// Returns how many of the ascending values are at or below x.
+function countAtOrBelow(sorted, x) {
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sorted[mid] <= x) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
+// Draws the normal Q-Q plot: each order statistic against the standard
+// normal quantile of its plotting position, with the reference line through
+// (Q1, z of 0.25) and (Q3, z of 0.75), which outliers do not tilt the way a
+// mean and SD line would. Values run along the horizontal axis like every
+// other value axis in the report.
+function drawQQ({ el, data, width, motion }) {
+  const q = data.charts.qq;
+  if (!q) {
+    showReason(el, `No Q-Q plot: ${shapeChartReason(data.stats, true)}.`);
+    return;
+  }
+  const svg = newSvg(el, width);
+  const f = plotFrame(svg, width, padDomain(q.x[0], q.x[q.x.length - 1], 0.03), padDomain(q.z[0], q.z[q.z.length - 1], 0.06), { title: "normal quantile (z)" });
+  const [d0, d1] = f.x.domain;
+  const ref = q.q3 > q.q1
+    ? { x1: f.x(d0), y1: f.y(q.zq1 + ((d0 - q.q1) * (q.zq3 - q.zq1)) / (q.q3 - q.q1)), x2: f.x(d1), y2: f.y(q.zq1 + ((d1 - q.q1) * (q.zq3 - q.zq1)) / (q.q3 - q.q1)) }
+    : { x1: f.x(q.q1), y1: f.bottom, x2: f.x(q.q1), y2: f.top };
+  const refLine = svgEl(svg, "line", Object.assign({ class: "ref-line", "clip-path": clipToPlot(svg, f) }, ref));
+  fadeIn(motion, refLine, 200);
+
+  const xs = q.x.map(f.x);
+  const ys = q.z.map(f.y);
+  const r = xs.length > 300 ? 2 : 3;
+  const dots = svgEl(svg, "g");
+  xs.forEach((cx, i) => svgEl(dots, "circle", { class: "dot qq-dot", cx, cy: ys[i], r }));
+  fadeIn(motion, dots, 400);
+  const anchors = [["Q1", q.q1, q.zq1], ["Q3", q.q3, q.zq3]];
+  for (const [, value, z] of anchors) {
+    const anchor = svgEl(svg, "rect", { class: "anchor", x: f.x(value) - 4, y: f.y(z) - 4, width: 8, height: 8 });
+    fadeIn(motion, anchor, 600);
+  }
+  addPlotTooltip(svg, f, (px, py) => {
+    const a = anchors.find(([, value, z]) => Math.abs(f.x(value) - px) <= 5 && Math.abs(f.y(z) - py) <= 5);
+    if (a) {
+      return [`${a[0]}, a point of the reference line`, `value ${minusSign(formatValue(a[1]))}, z = ${minusSign(a[2].toFixed(4))}`];
+    }
+    const i = nearestPoint(xs, ys, px, py);
+    return i < 0 ? null : [`Value ${minusSign(formatValue(q.x[i]))}`, `normal quantile z = ${minusSign(q.z[i].toFixed(3))}`];
+  });
+  finishSvg(svg, width, finishPlot(el, svg, f, width, "value") + 2);
+  showNote(el, "Points along the line mean the values follow a normal distribution; the line runs through Q1 and Q3 (squares).");
+  if (q.x.length < data.stats.count) {
+    showNote(el, `Showing ${q.x.length} of the ${data.stats.count} sorted values, spaced evenly in z so both tails are included.`);
+  }
+}
+
+// Returns the [start, end) input indices of trendline bucket i when n values
+// are split into buckets chunks, the same boundaries Go uses.
+function trendBounds(i, n, buckets) {
+  const step = n / buckets;
+  const start = Math.round(i * step);
+  let end = Math.min(Math.round((i + 1) * step), n);
+  if (end <= start) {
+    end = start + 1;
+  }
+  return [start, end];
+}
+
+// Draws the trendline: the values in input order (or, above 1,000 values,
+// each bucket's mean with its min-to-max band), the mean line and, under -e,
+// the EMA line, all uncovered left to right on scroll-in.
+function drawTrendline({ el, data, width, motion }) {
+  const t = data.charts.trendline;
+  const s = data.stats;
+  if (!t) {
+    showReason(el, `No trendline: ${orderChartReason(s, 2)}.`);
+    return;
+  }
+  const n = s.count;
+  const raw = t.mode === "raw";
+  const points = []; // one per raw value or bucket: position, value lines
+  if (raw) {
+    t.values.forEach((value, i) => points.push({ pos: i + 1, y: value, emaPos: i + 1, ema: t.ema && t.ema[i], lines: [`Position ${i + 1}`, `value ${minusSign(formatValue(value))}`] }));
+  } else {
+    t.mean.forEach((mean, i) => {
+      const [start, end] = trendBounds(i, n, t.mean.length);
+      points.push({
+        pos: (start + end + 1) / 2,
+        y: mean,
+        emaPos: end,
+        ema: t.ema && t.ema[i],
+        lo: t.min[i],
+        hi: t.max[i],
+        lines: [`Positions ${start + 1} to ${end}`, `mean ${minusSign(formatValue(mean))}`, `min ${minusSign(formatValue(t.min[i]))}, max ${minusSign(formatValue(t.max[i]))}`],
+      });
+    });
+  }
+  const svg = newSvg(el, width);
+  const f = plotFrame(svg, width, [1, Math.max(2, n)], padDomain(s.min, s.max, 0.05), { title: "value" });
+  const reveal = svgEl(svg, "g");
+  if (!raw) {
+    const upper = points.map((p) => `${f.x(p.pos)},${f.y(p.hi)}`);
+    const lower = points.map((p) => `${f.x(p.pos)},${f.y(p.lo)}`).reverse();
+    svgEl(reveal, "polygon", { class: "trend-band", points: upper.concat(lower).join(" ") });
+  }
+  const mean = centerMark(data, "mean");
+  const my = f.y(mean.value);
+  svgEl(reveal, "line", { class: "mean-line", x1: f.left, x2: f.right, y1: my, y2: my });
+  svgEl(reveal, "polyline", { class: "trend-line", points: points.map((p) => `${f.x(p.pos)},${f.y(p.y)}`).join(" ") });
+  if (t.ema) {
+    svgEl(reveal, "polyline", { class: "ema-line", points: points.map((p) => `${f.x(p.emaPos)},${f.y(p.ema)}`).join(" ") });
+  }
+  revealLeftToRight(motion, reveal);
+  // The label is left out when the mean's text is wider than the plot.
+  const meanLabel = svgText(svg, f.right - 2, my - 5, `Mean ${mean.text}`, { class: "halo", "text-anchor": "end" });
+  if (textWidth(meanLabel) > f.right - f.left - 4) {
+    meanLabel.remove();
+  } else {
+    fadeIn(motion, meanLabel, 1200);
+  }
+
+  const xs = points.map((p) => f.x(p.pos));
+  addPlotTooltip(svg, f, (px) => {
+    let best = 0;
+    xs.forEach((x, i) => {
+      if (Math.abs(x - px) < Math.abs(xs[best] - px)) {
+        best = i;
+      }
+    });
+    const p = points[best];
+    return t.ema ? p.lines.concat(`EMA ${minusSign(formatValue(p.ema))} at position ${p.emaPos}`) : p.lines;
+  });
+  finishSvg(svg, width, finishPlot(el, svg, f, width, "input position", 1) + 2);
+
+  const legend = [raw ? ["sw-line", "Values"] : ["sw-line", "Bucket mean"]];
+  if (!raw) {
+    legend.push(["sw-band", "Bucket min to max"]);
+  }
+  legend.push(["sw-mean", "Mean"]);
+  if (t.ema) {
+    legend.push(["sw-ema", `${data.distribution.ema.label}, ending at ${data.distribution.ema.text}`]);
+  }
+  showLegend(el, legend);
+  if (!raw) {
+    showNote(el, `The ${n} values are split into ${t.mean.length} buckets of consecutive positions.`);
+  }
+  showSortWarning(el, data);
+}
+
+// Sizes of the lag-1 plot.
+const LAG_MAX_SIDE = 340; // largest side of the square plot
+const LAG_SWATCHES = 5; // steps shown in the density grid's legend
+const LAG_MIN_SHADE = 0.12; // opacity floor of the shade scale, approached as a count goes to 0
+
+// Returns the opacity of a density-grid cell holding count pairs on a
+// square-root scale up to maxCount.
+function lagShade(count, maxCount) {
+  return LAG_MIN_SHADE + (1 - LAG_MIN_SHADE) * Math.sqrt(count / maxCount);
+}
+
+// Returns the counts the density grid's legend shows: 1, then counts evenly
+// spaced in shade up to maxCount, without repeats, so every swatch is the
+// exact shade of a cell holding that count.
+function lagLegendCounts(maxCount) {
+  const counts = [1];
+  for (let k = 1; k < LAG_SWATCHES; k++) {
+    const t = k / (LAG_SWATCHES - 1);
+    const c = Math.round(maxCount * t * t);
+    if (c > counts[counts.length - 1]) {
+      counts.push(c);
+    }
+  }
+  return counts;
+}
+
+// Draws the lag-1 plot: each value against the next, as dots up to 5,000
+// pairs, otherwise as a 64 x 64 grid of pair counts shaded on a square-root
+// scale (a linear one at 1M values lights only the central cells), with a
+// legend. A dashed diagonal marks next = current.
+function drawLag({ el, data, width, motion }) {
+  const l = data.charts.lag;
+  const s = data.stats;
+  if (!l) {
+    showReason(el, `No lag-1 plot: ${orderChartReason(s, 3)}.`);
+    return;
+  }
+  const grid = l.mode === "grid" ? l.grid : null;
+  const domain = grid ? [grid.min, grid.max] : padDomain(s.min, s.max, 0.03);
+  const svg = newSvg(el, width);
+  const f = plotFrame(svg, width, domain, domain, { title: "next value", square: true, height: clamp(width - 80, 160, LAG_MAX_SIDE) });
+  svgEl(svg, "line", { class: "leader", x1: f.x(domain[0]), y1: f.y(domain[0]), x2: f.x(domain[1]), y2: f.y(domain[1]) });
+  const layer = svgEl(svg, "g");
+  let pick;
+  if (grid) {
+    const size = grid.size;
+    const cell = (grid.max - grid.min) / size;
+    const maxCount = Math.max(...grid.counts);
+    grid.counts.forEach((c, i) => {
+      if (c > 0) {
+        const col = i % size;
+        const row = Math.floor(i / size);
+        const x0 = f.x(grid.min + col * cell);
+        const y0 = f.y(grid.min + (row + 1) * cell);
+        svgEl(layer, "rect", { class: "cell", x: x0, y: y0, width: f.x(grid.min + (col + 1) * cell) - x0 + 0.3, height: f.y(grid.min + row * cell) - y0 + 0.3, "fill-opacity": lagShade(c, maxCount).toFixed(3) });
+      }
+    });
+    pick = (px, py) => {
+      const col = clamp(Math.floor(((px - f.left) / (f.right - f.left)) * size), 0, size - 1);
+      const row = clamp(Math.floor(((f.bottom - py) / (f.bottom - f.top)) * size), 0, size - 1);
+      const c = grid.counts[row * size + col];
+      return [plural(c, "pair"), `value in ${rangeText(grid.min + col * cell, grid.min + (col + 1) * cell, col === size - 1)}`, `next in ${rangeText(grid.min + row * cell, grid.min + (row + 1) * cell, row === size - 1)}`];
+    };
+  } else {
+    const v = l.values;
+    const xs = v.slice(0, -1).map(f.x);
+    const ys = v.slice(1).map(f.y);
+    // Fewer pairs get larger, more opaque dots; many overlap, so they stay faint.
+    const [r, opacity] = xs.length > 1000 ? [1.8, 0.3] : xs.length > 200 ? [2.5, 0.45] : [3.5, 0.65];
+    xs.forEach((cx, i) => svgEl(layer, "circle", { class: "dot lag-dot", cx, cy: ys[i], r, "fill-opacity": opacity }));
+    pick = (px, py) => {
+      const i = nearestPoint(xs, ys, px, py);
+      return i < 0 ? null : [`Positions ${i + 1} and ${i + 2}`, `value ${minusSign(formatValue(v[i]))}`, `next ${minusSign(formatValue(v[i + 1]))}`];
+    };
+  }
+  fadeIn(motion, layer, 200);
+  addPlotTooltip(svg, f, pick);
+  let bottom = finishPlot(el, svg, f, width, "value");
+
+  if (grid) {
+    // Legend: swatches for real counts, each in the shade a cell with that
+    // count gets. The entries wrap onto another line at the right edge.
+    const maxCount = Math.max(...grid.counts);
+    const legend = svgEl(svg, "g");
+    const title = svgText(legend, 0, bottom + 16, "pairs per cell", { class: "muted" });
+    let lx = textWidth(title) + 10;
+    let ly = bottom + 16;
+    for (const count of lagLegendCounts(maxCount)) {
+      const label = svgText(legend, 0, 0, String(count));
+      const entryWidth = 18 + textWidth(label);
+      if (lx + entryWidth > width) {
+        lx = 0;
+        ly += 18;
+      }
+      svgEl(legend, "rect", { class: "cell", x: lx, y: ly - 10, width: 14, height: 12, "fill-opacity": lagShade(count, maxCount).toFixed(3) });
+      label.setAttribute("x", lx + 18);
+      label.setAttribute("y", ly);
+      lx += entryWidth + 10;
+    }
+    bottom = ly + 8;
+  }
+  finishSvg(svg, width, bottom + 2);
+
+  const ac = data.distribution.autocorrelation;
+  if (ac) {
+    showNote(el, `Autocorrelation ${ac.text} (${ac.reading}).`);
+  }
+  if (grid) {
+    showNote(el, `${s.count - 1} pairs are too many to draw as dots, so they are counted in a ${grid.size} × ${grid.size} grid; shading uses a square-root scale so sparse cells stay visible.`);
+  }
+  showSortWarning(el, data);
+}
+
 // ===== Startup ============================================================
 
 // The drawing function for each data-chart name in the template.
@@ -985,6 +1671,11 @@ const CHART_DRAWERS = {
   skewness: drawGauge,
   kurtosis: drawGauge,
   cv: drawGauge,
+  histogram: drawHistogram,
+  ecdf: drawECDF,
+  qq: drawQQ,
+  trendline: drawTrendline,
+  lag: drawLag,
 };
 
 const reportData = loadReportData();

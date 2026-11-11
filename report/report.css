@@ -32,6 +32,8 @@
   --mk-geomean: #bc4c00;
   --mk-trimmedmean: #bf3989;
   --ci: rgba(9, 105, 218, 0.35);
+  --curve: #cf222e;
+  --ema: #bc4c00;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -67,6 +69,8 @@
     --mk-geomean: #f0883e;
     --mk-trimmedmean: #f778ba;
     --ci: rgba(68, 147, 248, 0.45);
+    --curve: #ff7b72;
+    --ema: #f0883e;
   }
 }
 
@@ -268,8 +272,11 @@ body {
   font-weight: 600;
 }
 
+/* Labels are kept inside each chart, but one longer than the chart itself
+   (a 175-digit value near 1e-170) is cut rather than widening the page. */
 .chart {
   min-width: 0;
+  overflow-x: clip;
   font: 0.85rem/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -305,6 +312,8 @@ body {
 .chart-reason {
   margin: 0.3rem 0 0;
   color: var(--muted);
+  /* A long number (data near 1e-100) wraps instead of being clipped. */
+  overflow-wrap: anywhere;
 }
 
 .chart-warning {
@@ -423,6 +432,137 @@ body {
 
 .needle-head {
   fill: var(--fg);
+}
+
+/* Section 4: distribution charts. */
+.hist-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.75rem;
+  margin-bottom: 0.3rem;
+}
+
+.hist-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+}
+
+.hist-label input {
+  width: min(16rem, 55vw);
+  accent-color: var(--chart-fill);
+}
+
+.hist-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.bar {
+  fill: var(--chart-fill-soft);
+  stroke: var(--chart-fill);
+  stroke-width: 0.75;
+}
+
+.normal-curve,
+.ecdf-line,
+.trend-line,
+.ema-line {
+  fill: none;
+  stroke-width: 1.75;
+  stroke-linejoin: round;
+}
+
+.normal-curve {
+  stroke: var(--curve);
+}
+
+.ecdf-line,
+.trend-line {
+  stroke: var(--chart-fill);
+}
+
+.ema-line {
+  stroke: var(--ema);
+  stroke-dasharray: 6 3;
+}
+
+.trend-band {
+  fill: var(--chart-fill-soft);
+  stroke: none;
+}
+
+.mean-line,
+.ref-line {
+  stroke: var(--fg);
+  stroke-width: 1.25;
+  stroke-dasharray: 5 4;
+}
+
+.mark-dot {
+  fill: var(--card-bg);
+  stroke: var(--fg);
+  stroke-width: 1.75;
+}
+
+.anchor {
+  fill: var(--card-bg);
+  stroke: var(--fg);
+  stroke-width: 1.5;
+}
+
+.qq-dot,
+.lag-dot {
+  fill-opacity: 0.45;
+  stroke-width: 0.75;
+}
+
+.lag-dot {
+  stroke: none;
+}
+
+.cell {
+  fill: var(--chart-fill);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 1rem;
+  margin: 0.3rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.swatch {
+  display: inline-block;
+  width: 1.4rem;
+  height: 0;
+  border-top: 2px solid var(--chart-fill);
+}
+
+.sw-band {
+  height: 0.6rem;
+  border: 0;
+  background: var(--chart-fill-soft);
+}
+
+.sw-mean {
+  border-top: 2px dashed var(--fg);
+}
+
+.sw-ema {
+  border-top: 2px dashed var(--ema);
 }
 
 .chart-tip {

@@ -85,11 +85,12 @@ type reportSection struct {
 // reportData is the payload marshaled into the page's JSON data block and
 // rendered by the template. Everything in it is bounded in size.
 type reportData struct {
-	Stats    reportStats     `json:"stats"`
-	Sections []reportSection `json:"sections"`
-	Footnote string          `json:"footnote,omitempty"`
-	Charts   chartData       `json:"charts"`
-	Summary  summaryCharts   `json:"summary"`
+	Stats        reportStats        `json:"stats"`
+	Sections     []reportSection    `json:"sections"`
+	Footnote     string             `json:"footnote,omitempty"`
+	Charts       chartData          `json:"charts"`
+	Summary      summaryCharts      `json:"summary"`
+	Distribution distributionCharts `json:"distribution"`
 }
 
 // reportPage is the value passed to the report template. CSS and JS carry
@@ -275,10 +276,11 @@ func newReportSections(s *Stats) []reportSection {
 // script block and renders null instead.
 func buildReportPage(s *Stats, data []float64, inputArg string, now time.Time, numBins int, logTransformed bool) (*reportPage, error) {
 	report := reportData{
-		Stats:    newReportStats(s, logTransformed),
-		Sections: newReportSections(s),
-		Charts:   newChartData(data, s),
-		Summary:  newSummaryCharts(s, numBins),
+		Stats:        newReportStats(s, logTransformed),
+		Sections:     newReportSections(s),
+		Charts:       newChartData(data, s),
+		Summary:      newSummaryCharts(s, numBins),
+		Distribution: newDistributionCharts(s),
 	}
 	if s.TrimDatasetPct > 0 {
 		report.Footnote = trimFootnote

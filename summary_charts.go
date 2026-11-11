@@ -22,6 +22,13 @@ type chartMark struct {
 	Text  string  `json:"text"`
 }
 
+// percentileMark is a percentile drawn on a chart: its value, and P, the
+// percentile itself (25 for Q1), which places it on a cumulative scale.
+type percentileMark struct {
+	chartMark
+	P float64 `json:"p"`
+}
+
 // chartInterval is a labeled range drawn on a summary chart. Text is the
 // range as "[low, high]" with both ends formatted like the text output.
 type chartInterval struct {
@@ -76,13 +83,13 @@ type gaugeChart struct {
 // summaryCharts is the "summary" object of the report data block. Range is
 // omitted when the data has no spread.
 type summaryCharts struct {
-	Distinct distinctChart `json:"distinct"`
-	Range    []chartMark   `json:"range,omitempty"`
-	Center   centerChart   `json:"center"`
-	Ladder   []chartMark   `json:"ladder"`
-	Skewness gaugeChart    `json:"skewness"`
-	Kurtosis gaugeChart    `json:"kurtosis"`
-	CV       gaugeChart    `json:"cv"`
+	Distinct distinctChart    `json:"distinct"`
+	Range    []chartMark      `json:"range,omitempty"`
+	Center   centerChart      `json:"center"`
+	Ladder   []percentileMark `json:"ladder"`
+	Skewness gaugeChart       `json:"skewness"`
+	Kurtosis gaugeChart       `json:"kurtosis"`
+	CV       gaugeChart       `json:"cv"`
 }
 
 // newSummaryCharts builds every summary chart input from s. numBins is the -b
@@ -165,7 +172,7 @@ func newCenterChart(s *Stats, numBins int) centerChart {
 // ladderMarks returns the quartiles, p95, p99 and any -p percentiles in
 // ascending order of percentile. A -p value equal to 25 or 75 merges into the
 // quartile rung, since both are the same percentile of the same data.
-func ladderMarks(s *Stats) []chartMark {
+func ladderMarks(s *Stats) []percentileMark {
 	values := map[float64]float64{25: s.Q1, 75: s.Q3, 95: s.P95, 99: s.P99}
 	for p, v := range s.CustomPercentiles {
 		if p != 25 && p != 75 {
@@ -177,7 +184,7 @@ func ladderMarks(s *Stats) []chartMark {
 		keys = append(keys, p)
 	}
 	sort.Float64s(keys)
-	marks := make([]chartMark, len(keys))
+	marks := make([]percentileMark, len(keys))
 	for i, p := range keys {
 		key := "p" + formatFloat(p)
 		label := key
@@ -187,7 +194,7 @@ func ladderMarks(s *Stats) []chartMark {
 		case 75:
 			label = "Q3 (p75)"
 		}
-		marks[i] = mark(key, label, values[p])
+		marks[i] = percentileMark{chartMark: mark(key, label, values[p]), P: p}
 	}
 	return marks
 }

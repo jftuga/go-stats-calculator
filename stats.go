@@ -1168,7 +1168,7 @@ func centralRows(s *Stats) []statRow {
 		rows = append(rows, statRow{Kind: "trimmedmean", Label: fmt.Sprintf("Trimmed Mean (%s%%)", formatFloat(s.TrimmedMeanPct)), Value: formatFloat(s.TrimmedMean)})
 	}
 	if s.EMASpan > 0 {
-		rows = append(rows, statRow{Kind: "ema", Label: fmt.Sprintf("EMA (span %d)", s.EMASpan), Value: formatFloat(s.EMA)})
+		rows = append(rows, statRow{Kind: "ema", Label: emaLabel(s.EMASpan), Value: formatFloat(s.EMA)})
 	}
 	rows = append(rows, statRow{Kind: "median", Label: "Median (p50)", Value: formatFloat(s.Median)})
 
@@ -1287,17 +1287,31 @@ func distributionRows(s *Stats) []statRow {
 	}
 	if s.InputOrder != "" {
 		orderStr := s.InputOrder
-		if s.InputOrder == "ascending" || s.InputOrder == "descending" {
-			// EMA is order-dependent too, so name it whenever it is on display.
-			affected := "trendline and autocorrelation"
-			if s.EMASpan > 0 {
-				affected = "trendline, autocorrelation, and EMA"
-			}
-			orderStr += " WARNING: " + affected + " reflect this sort order, not a property of the data"
+		if warning := sortOrderWarning(s); warning != "" {
+			orderStr += " WARNING: " + warning
 		}
 		rows = append(rows, statRow{Kind: "inputorder", Label: "Input Order", Value: orderStr})
 	}
 	return rows
+}
+
+// sortOrderWarning returns the warning printed after an ascending or
+// descending input order, or "" for any other order.
+func sortOrderWarning(s *Stats) string {
+	if s.InputOrder != "ascending" && s.InputOrder != "descending" {
+		return ""
+	}
+	// EMA is order-dependent too, so name it whenever it is on display.
+	affected := "trendline and autocorrelation"
+	if s.EMASpan > 0 {
+		affected = "trendline, autocorrelation, and EMA"
+	}
+	return affected + " reflect this sort order, not a property of the data"
+}
+
+// emaLabel is the EMA row's label for the given span.
+func emaLabel(span int) string {
+	return fmt.Sprintf("EMA (span %d)", span)
 }
 
 // printStats displays the results in a readable format.

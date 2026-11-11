@@ -610,3 +610,48 @@ func TestReportConditionalRows(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderReportDistributionCharts checks that every section 4 chart
+// container appears exactly once, under its row when the row exists, at the
+// end of the section when the row is absent, and in a Distribution card of its
+// own when the text output has no Distribution section at all.
+func TestRenderReportDistributionCharts(t *testing.T) {
+	charts := []string{"histogram", "ecdf", "qq", "trendline", "lag"}
+	tenTenths := make([]float64, 10)
+	for i := range tenTenths {
+		tenTenths[i] = 0.1
+	}
+	datasets := map[string][]float64{
+		"full":       testData,
+		"n=1":        {5},
+		"constant":   {3, 3, 3, 3},
+		"ten tenths": tenTenths,
+	}
+	for name, data := range datasets {
+		_, html := renderTestReport(t, data, nil, 0, 0, 0)
+		if n := strings.Count(html, "<h2>Distribution</h2>"); n != 1 {
+			t.Errorf("%s: %d Distribution sections, want 1", name, n)
+		}
+		for _, chart := range charts {
+			if n := strings.Count(html, `<div class="chart" data-chart="`+chart+`"></div>`); n != 1 {
+				t.Errorf("%s: %d %q chart containers, want 1", name, n, chart)
+			}
+		}
+	}
+
+	// With every row present, each chart follows its own row in order.
+	_, html := renderTestReport(t, testData, nil, 0, 0, 0)
+	order := []string{
+		`value-histogram"`, `data-chart="histogram"`, `data-chart="ecdf"`, `data-chart="qq"`,
+		`value-trendline"`, `data-chart="trendline"`,
+		`value-autocorrelation"`, `data-chart="lag"`,
+	}
+	last := -1
+	for _, marker := range order {
+		i := strings.Index(html, marker)
+		if i <= last {
+			t.Errorf("%s is missing or out of order (at %d, previous at %d)", marker, i, last)
+		}
+		last = i
+	}
+}

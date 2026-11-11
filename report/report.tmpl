@@ -28,28 +28,30 @@
 {{- range $index, $section := .Report.Sections}}
 <section class="card">
 <h2>{{.Title}}</h2>
+{{- /* Section 4 charts sit under their rows; a chart whose row is absent
+     goes at the end of the section, so it can still give its reason. */}}
+{{- $histogram := false}}{{$trendline := false}}{{$lag := false}}
 <dl class="rows">
 {{- range .Rows}}
 <div class="row">
 <dt><button type="button" class="term" popovertarget="def-{{.ID}}">{{.Label}}</button></dt>
 <dd class="value value-{{.Kind}}">{{if .List}}{{template "list" .List}}{{else}}{{.Value}}{{end}}{{template "rowchart" .Kind}}</dd>
 </div>
-{{- if eq .Kind "iqr"}}
+{{- if eq .Kind "histogram"}}{{$histogram = true}}{{end}}
+{{- if eq .Kind "trendline"}}{{$trendline = true}}{{end}}
+{{- if eq .Kind "autocorrelation"}}{{$lag = true}}{{end}}
+{{- if eq .Kind "iqr" "histogram" "trendline" "autocorrelation"}}
 </dl>
-<div class="charts">
-<figure class="chart-figure">
-<figcaption class="chart-title">Box plot (Tukey, IQR method)</figcaption>
-<div class="chart" data-chart="box"></div>
-</figure>
-<figure class="chart-figure">
-<figcaption class="chart-title">Percentile ladder</figcaption>
-<div class="chart" data-chart="ladder"></div>
-</figure>
-</div>
+{{- template "rowcharts" .Kind}}
 <dl class="rows">
 {{- end}}
 {{- end}}
 </dl>
+{{- if eq $index 3}}
+{{- if not $histogram}}{{template "rowcharts" "histogram"}}{{end}}
+{{- if not $trendline}}{{template "rowcharts" "trendline"}}{{end}}
+{{- if not $lag}}{{template "rowcharts" "autocorrelation"}}{{end}}
+{{- end}}
 {{- if eq $index 0}}
 <div class="charts">
 <figure class="chart-figure">
@@ -76,6 +78,14 @@
 {{- end}}
 </section>
 {{- end}}
+{{- if lt (len .Report.Sections) 4}}
+<section class="card">
+<h2>Distribution</h2>
+{{- template "rowcharts" "histogram"}}
+{{- template "rowcharts" "trendline"}}
+{{- template "rowcharts" "autocorrelation"}}
+</section>
+{{- end}}
 {{- with .Report.Footnote}}
 <p class="footnote">* {{.}}</p>
 {{- end}}
@@ -95,6 +105,43 @@
 {{- if .Tail}}<li class="gap" aria-hidden="true">…</li>{{range .Tail}}<li>{{.}}</li>{{end}}{{end -}}
 </ul>
 </details>
+{{- end}}
+{{- define "rowcharts"}}
+<div class="charts">
+{{- if eq . "iqr"}}
+<figure class="chart-figure">
+<figcaption class="chart-title">Box plot (Tukey, IQR method)</figcaption>
+<div class="chart" data-chart="box"></div>
+</figure>
+<figure class="chart-figure">
+<figcaption class="chart-title">Percentile ladder</figcaption>
+<div class="chart" data-chart="ladder"></div>
+</figure>
+{{- else if eq . "histogram"}}
+<figure class="chart-figure">
+<figcaption class="chart-title">Histogram with a normal curve</figcaption>
+<div class="chart" data-chart="histogram"></div>
+</figure>
+<figure class="chart-figure">
+<figcaption class="chart-title">Empirical cumulative distribution (ECDF)</figcaption>
+<div class="chart" data-chart="ecdf"></div>
+</figure>
+<figure class="chart-figure">
+<figcaption class="chart-title">Normal Q-Q plot</figcaption>
+<div class="chart" data-chart="qq"></div>
+</figure>
+{{- else if eq . "trendline"}}
+<figure class="chart-figure">
+<figcaption class="chart-title">Trendline: values in input order</figcaption>
+<div class="chart" data-chart="trendline"></div>
+</figure>
+{{- else if eq . "autocorrelation"}}
+<figure class="chart-figure">
+<figcaption class="chart-title">Lag-1 plot: each value against the next</figcaption>
+<div class="chart" data-chart="lag"></div>
+</figure>
+{{- end}}
+</div>
 {{- end}}
 {{- define "rowchart"}}
 {{- if eq . "distinct"}}<div class="chart chart-inline" data-chart="distinct"></div>
