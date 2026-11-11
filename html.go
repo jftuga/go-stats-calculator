@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,16 +38,64 @@ type reportOption struct {
 	Value string
 }
 
-// reportData is the payload marshaled into the page's JSON data block.
+// reportListCap is how many values of a long list the report keeps at each
+// end, so the file size stays bounded however many modes or outliers exist.
+const reportListCap = 50
+
+// cappedList is a list cut down to at most a fixed number of values at each
+// end. Head holds the first (lowest) values and Tail the highest; Tail is
+// empty unless values were dropped from the middle.
+type cappedList[T any] struct {
+	Count int `json:"count"`
+	Head  []T `json:"head"`
+	Tail  []T `json:"tail,omitempty"`
+}
+
+// reportStats is the -j statistics object with its four unbounded lists
+// replaced by capped copies. The capped fields shadow the embedded fields of
+// the same JSON name, since encoding/json emits the least nested one, and the
+// embedded copy has those lists cleared. Every raw number stays, so a NaN or
+// Inf still fails json.Marshal.
+type reportStats struct {
+	statsOutput
+	Mode           *cappedList[float64] `json:"mode"`
+	Outliers       *cappedList[float64] `json:"outliers"`
+	ZScoreOutliers *cappedList[float64] `json:"zScoreOutliers"`
+	ModZOutliers   *cappedList[float64] `json:"modZOutliers"`
+}
+
+// reportRow is one statistic as the report shows it. Value matches the text
+// output exactly; a list-valued row carries List instead. ID is unique within
+// the page and names the row's definition popover.
+type reportRow struct {
+	ID      string              `json:"id"`
+	Kind    string              `json:"kind"`
+	Label   string              `json:"label"`
+	Value   string              `json:"value,omitempty"`
+	Reading string              `json:"reading,omitempty"`
+	List    *cappedList[string] `json:"list,omitempty"`
+}
+
+// reportSection is a titled group of report rows.
+type reportSection struct {
+	Title string      `json:"title"`
+	Rows  []reportRow `json:"rows"`
+}
+
+// reportData is the payload marshaled into the page's JSON data block and
+// rendered by the template. Everything in it is bounded in size.
 type reportData struct {
-	Stats statsOutput `json:"stats"`
+	Stats    reportStats     `json:"stats"`
+	Sections []reportSection `json:"sections"`
+	Footnote string          `json:"footnote,omitempty"`
 }
 
 // reportPage is the value passed to the report template. CSS and JS carry
-// only the embedded report files; Data is the already-marshaled reportData.
+// only the embedded report files; Data is the already-marshaled Report.
 type reportPage struct {
 	CSS            template.CSS
 	JS             template.JS
+	Report         reportData
 	Data           json.RawMessage
 	Input          string
 	Generated      string
@@ -135,11 +184,99 @@ func reportOptions(s *Stats, numBins int, logTransformed bool) []reportOption {
 	return opts
 }
 
+// capList keeps the first head and last tail values of a sorted list, copying
+// them so the result does not pin the full list. A nil list, meaning the
+// detector never ran, stays nil.
+func capList(values []float64, head, tail int) *cappedList[float64] {
+	if values == nil {
+		return nil
+	}
+	c := &cappedList[float64]{Count: len(values)}
+	if len(values) <= head+tail {
+		c.Head = slices.Clone(values)
+		return c
+	}
+	c.Head = slices.Clone(values[:head])
+	if tail > 0 {
+		c.Tail = slices.Clone(values[len(values)-tail:])
+	}
+	return c
+}
+
+// formatList formats every kept value of a capped list with formatFloat.
+func formatList(c *cappedList[float64]) *cappedList[string] {
+	f := &cappedList[string]{Count: c.Count, Head: make([]string, len(c.Head))}
+	for i, v := range c.Head {
+		f.Head[i] = formatFloat(v)
+	}
+	for _, v := range c.Tail {
+		f.Tail = append(f.Tail, formatFloat(v))
+	}
+	return f
+}
+
+// listTail is how many highest values a list row keeps: modes keep only
+// the first reportListCap, outlier lists also keep the highest.
+func listTail(kind string) int {
+	if kind == "mode" {
+		return 0
+	}
+	return reportListCap
+}
+
+// newReportStats builds the bounded statistics object for the data block from
+// a copy of s, leaving s itself untouched.
+func newReportStats(s *Stats, logTransformed bool) reportStats {
+	bounded := *s
+	out := newStatsOutput(&bounded, logTransformed)
+	r := reportStats{
+		statsOutput:    out,
+		Mode:           capList(bounded.Mode, reportListCap, 0),
+		Outliers:       capList(bounded.Outliers, reportListCap, reportListCap),
+		ZScoreOutliers: capList(bounded.ZScoreOutliers, reportListCap, reportListCap),
+		ModZOutliers:   capList(bounded.ModZOutliers, reportListCap, reportListCap),
+	}
+	bounded.Mode, bounded.Outliers, bounded.ZScoreOutliers, bounded.ModZOutliers = nil, nil, nil, nil
+	return r
+}
+
+// newReportSections converts the text output's rows into report rows. A
+// repeated kind (percentiles) gets a numeric suffix so every ID is unique, and
+// a list-valued row is capped and formatted.
+func newReportSections(s *Stats) []reportSection {
+	seen := make(map[string]int)
+	var sections []reportSection
+	for _, section := range statSections(s) {
+		rs := reportSection{Title: section.Title, Rows: make([]reportRow, len(section.Rows))}
+		for i, row := range section.Rows {
+			seen[row.Kind]++
+			id := row.Kind
+			if n := seen[row.Kind]; n > 1 {
+				id += "-" + strconv.Itoa(n)
+			}
+			rr := reportRow{ID: id, Kind: row.Kind, Label: row.Label, Value: row.Value, Reading: row.Reading}
+			if len(row.Values) > 0 {
+				rr.List = formatList(capList(row.Values, reportListCap, listTail(row.Kind)))
+			}
+			rs.Rows[i] = rr
+		}
+		sections = append(sections, rs)
+	}
+	return sections
+}
+
 // buildReportPage assembles the template value for a report. It marshals the
 // chart data itself, because html/template hides a marshal error (such as a
 // NaN or Inf) inside a JSON script block and renders null instead.
 func buildReportPage(s *Stats, inputArg string, now time.Time, numBins int, logTransformed bool) (*reportPage, error) {
-	data, err := json.Marshal(reportData{Stats: newStatsOutput(s, logTransformed)})
+	report := reportData{
+		Stats:    newReportStats(s, logTransformed),
+		Sections: newReportSections(s),
+	}
+	if s.TrimDatasetPct > 0 {
+		report.Footnote = trimFootnote
+	}
+	data, err := json.Marshal(report)
 	if err != nil {
 		return nil, fmt.Errorf("encoding report data: %w", err)
 	}
@@ -159,6 +296,7 @@ func buildReportPage(s *Stats, inputArg string, now time.Time, numBins int, logT
 	page := &reportPage{
 		CSS:            template.CSS(css),
 		JS:             template.JS(js),
+		Report:         report,
 		Data:           data,
 		Input:          input,
 		Generated:      now.Format("2006-01-02 15:04:05 MST"),

@@ -287,3 +287,260 @@ func TestRenderReportHeader(t *testing.T) {
 		t.Errorf("default stdin header rendered incorrectly:\n%s", out)
 	}
 }
+
+// reportRows flattens the rows of every section in a decoded data block.
+func reportRows(t *testing.T, data map[string]any) []map[string]any {
+	t.Helper()
+	var rows []map[string]any
+	for _, section := range data["sections"].([]any) {
+		for _, row := range section.(map[string]any)["rows"].([]any) {
+			rows = append(rows, row.(map[string]any))
+		}
+	}
+	return rows
+}
+
+// findRow returns the first row of the given kind, or nil when there is none.
+func findRow(rows []map[string]any, kind string) map[string]any {
+	for _, row := range rows {
+		if row["kind"] == kind {
+			return row
+		}
+	}
+	return nil
+}
+
+// renderTestReport computes statistics for data and renders a report page.
+func renderTestReport(t *testing.T, data []float64, percentiles []float64, zThreshold, trimPct float64, emaSpan int) (*Stats, string) {
+	t.Helper()
+	s, err := computeStats(data, percentiles, defaultIQRMultiplier, defaultNumBins, zThreshold, trimPct, emaSpan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := buildReportPage(s, "data.txt", time.Date(2026, 11, 10, 14, 30, 5, 0, time.UTC), defaultNumBins, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := renderReport(page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, string(out)
+}
+
+// TestRenderReportSections renders a known dataset, parses the data block
+// back, and checks that values are formatted exactly as the text output
+// formats them and that every row has a unique, defined popover.
+func TestRenderReportSections(t *testing.T) {
+	s, html := renderTestReport(t, testData, []float64{90, 10}, 2, 10, 5)
+	data := reportJSON(t, html)
+
+	var titles []string
+	for _, section := range data["sections"].([]any) {
+		titles = append(titles, section.(map[string]any)["title"].(string))
+	}
+	wantTitles := []string{"Descriptive Statistics", "Measures of Central Tendency", "Measures of Spread & Distribution", "Distribution"}
+	if strings.Join(titles, "|") != strings.Join(wantTitles, "|") {
+		t.Errorf("section titles = %v, want %v", titles, wantTitles)
+	}
+
+	rows := reportRows(t, data)
+	wantValues := map[string]string{
+		"mean":        formatFloat(s.Mean),
+		"stddev":      formatFloat(s.StdDev),
+		"median":      formatFloat(s.Median),
+		"iqr":         formatFloat(s.IQR),
+		"trimmedmean": formatFloat(s.TrimmedMean),
+		"ema":         formatFloat(s.EMA),
+		"ci95":        "[" + formatFloat(s.CI95Lower) + ", " + formatFloat(s.CI95Upper) + "]",
+		"skewness":    formatFloat(s.Skewness) + " (" + interpretSkewness(s.Skewness) + ")",
+		"cv":          formatFloat(s.CV) + "% (" + interpretCV(s.CV) + ")",
+	}
+	for kind, want := range wantValues {
+		row := findRow(rows, kind)
+		if row == nil {
+			t.Errorf("row %q missing", kind)
+			continue
+		}
+		if row["value"] != want {
+			t.Errorf("row %q value = %v, want %q", kind, row["value"], want)
+		}
+		if !strings.Contains(html, `<dd class="value value-`+kind+`">`+want+"</dd>") {
+			t.Errorf("rendered page does not show %q for %q", want, kind)
+		}
+	}
+	wantReadings := map[string]string{
+		"skewness":        interpretSkewness(s.Skewness),
+		"kurtosis":        interpretKurtosis(s.Kurtosis),
+		"cv":              interpretCV(s.CV),
+		"autocorrelation": interpretAutocorrelation(s.Autocorrelation),
+	}
+	for kind, want := range wantReadings {
+		if row := findRow(rows, kind); row == nil || row["reading"] != want {
+			t.Errorf("row %q reading = %v, want %q", kind, row["reading"], want)
+		}
+	}
+	if stats := data["stats"].(map[string]any); stats["mean"] != s.Mean || stats["skewness"] != s.Skewness {
+		t.Errorf("raw stats not carried: mean %v, skewness %v", stats["mean"], stats["skewness"])
+	}
+
+	var pctLabels, pctIDs []string
+	ids := make(map[string]bool)
+	for _, row := range rows {
+		id := row["id"].(string)
+		if ids[id] {
+			t.Errorf("duplicate row id %q", id)
+		}
+		ids[id] = true
+		if !strings.Contains(html, `popovertarget="def-`+id+`"`) {
+			t.Errorf("row %q has no label button", id)
+		}
+		_, popover, found := strings.Cut(html, `<div popover="auto" id="def-`+id+`" class="def">`)
+		popover, _, _ = strings.Cut(popover, "</div>")
+		if !found || !strings.Contains(popover, `class="formula"`) {
+			t.Errorf("row %q has no popover with a definition and formula", id)
+		}
+		if row["kind"] == "percentile" {
+			pctLabels = append(pctLabels, row["label"].(string))
+			pctIDs = append(pctIDs, id)
+		}
+	}
+	if got := strings.Join(pctLabels, ","); got != "Percentile (p10),Percentile (p90),Percentile (p95),Percentile (p99)" {
+		t.Errorf("percentile rows = %s", got)
+	}
+	if got := strings.Join(pctIDs, ","); got != "percentile,percentile-2,percentile-3,percentile-4" {
+		t.Errorf("percentile ids = %s", got)
+	}
+	if strings.Contains(html, "innerHTML") {
+		t.Errorf("report script must not use innerHTML")
+	}
+}
+
+// TestReportPayloadBounded checks that modes and every outlier list are
+// capped in the data block and the page, so the report stays small when
+// every value repeats and outliers number in the thousands.
+func TestReportPayloadBounded(t *testing.T) {
+	// 20,000 central values and 600 far values on each side, each appearing
+	// twice: every value is a mode, and the far values are outliers by all
+	// three methods.
+	var data []float64
+	for i := range 20000 {
+		data = append(data, float64(i), float64(i))
+	}
+	for i := range 600 {
+		data = append(data, 1e6+float64(i), 1e6+float64(i), -1e6-float64(i), -1e6-float64(i))
+	}
+	s, html := renderTestReport(t, data, nil, 2, 0, 0)
+	if len(s.Mode) != 21200 || len(s.Outliers) != 2400 || len(s.ZScoreOutliers) != 2400 || len(s.ModZOutliers) != 2400 {
+		t.Fatalf("unexpected dataset shape: %d modes, %d/%d/%d outliers", len(s.Mode), len(s.Outliers), len(s.ZScoreOutliers), len(s.ModZOutliers))
+	}
+	if len(html) > 200_000 {
+		t.Errorf("report is %d bytes, want under 200000", len(html))
+	}
+
+	stats := reportJSON(t, html)["stats"].(map[string]any)
+	mode := stats["mode"].(map[string]any)
+	if mode["count"] != float64(21200) || len(mode["head"].([]any)) != reportListCap || mode["tail"] != nil {
+		t.Errorf("mode not capped to the first %d: count %v, head %d, tail %v", reportListCap, mode["count"], len(mode["head"].([]any)), mode["tail"])
+	}
+	sources := map[string][]float64{"outliers": s.Outliers, "zScoreOutliers": s.ZScoreOutliers, "modZOutliers": s.ModZOutliers}
+	for _, key := range []string{"outliers", "zScoreOutliers", "modZOutliers"} {
+		src := sources[key]
+		list := stats[key].(map[string]any)
+		head, tail := list["head"].([]any), list["tail"].([]any)
+		if list["count"] != float64(2400) || len(head) != reportListCap || len(tail) != reportListCap {
+			t.Errorf("%s not capped: count %v, head %d, tail %d", key, list["count"], len(head), len(tail))
+			continue
+		}
+		if head[0] != src[0] || tail[len(tail)-1] != src[len(src)-1] {
+			t.Errorf("%s does not keep the lowest and highest values: %v ... %v", key, head[0], tail[len(tail)-1])
+		}
+	}
+	for _, want := range []string{"21200 values (showing first 50 of 21200)", "2400 values (showing 50 lowest and 50 highest of 2400)"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("rendered page missing %q", want)
+		}
+	}
+	if len(s.Mode) != 21200 || len(s.Outliers) != 2400 {
+		t.Errorf("building the report modified the statistics")
+	}
+
+	// A detector that never ran stays null; one that found nothing is empty.
+	_, html = renderTestReport(t, testData, nil, 0, 0, 0)
+	stats = reportJSON(t, html)["stats"].(map[string]any)
+	if stats["zScoreOutliers"] != nil || stats["modZOutliers"] != nil {
+		t.Errorf("disabled detectors should be null, got %v and %v", stats["zScoreOutliers"], stats["modZOutliers"])
+	}
+	_, html = renderTestReport(t, []float64{1, 2, 3, 4}, nil, 0, 0, 0)
+	stats = reportJSON(t, html)["stats"].(map[string]any)
+	if outliers := stats["outliers"].(map[string]any); outliers["count"] != float64(0) || len(outliers["head"].([]any)) != 0 {
+		t.Errorf("empty outlier list should be count 0 with an empty head, got %v", outliers)
+	}
+}
+
+// TestReportConditionalRows checks through the CLI that rows appear and
+// disappear with the flags exactly as they do in the text output.
+func TestReportConditionalRows(t *testing.T) {
+	data, err := os.ReadFile("test_data.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	input := filepath.Join(dir, "data.txt")
+	if err := os.WriteFile(input, append(data, []byte("abc\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	always := []string{"count", "skipped", "distinct", "mean", "median", "mode", "stddev", "cv", "skewness", "symmetry", "outliers", "histogram"}
+	cases := []struct {
+		args        []string
+		present     []string
+		absent      []string
+		percentiles string
+		footnote    bool
+	}{
+		{nil, []string{"ci95", "geomean", "trendline", "autocorrelation", "inputorder"}, []string{"zoutliers", "modzoutliers", "trimmedmean", "ema"}, "p95,p99", false},
+		{[]string{"-z", "2"}, []string{"zoutliers", "modzoutliers"}, nil, "p95,p99", false},
+		{[]string{"-t", "10"}, []string{"trimmedmean"}, []string{"ema"}, "p95,p99", false},
+		{[]string{"-e", "3"}, []string{"ema"}, []string{"trimmedmean"}, "p95,p99", false},
+		{[]string{"-p", "99.5,10,95"}, nil, nil, "p10,p95,p99,p99.5", false},
+		{[]string{"-T", "10"}, nil, []string{"trendline", "autocorrelation", "inputorder"}, "p95,p99", true},
+		{[]string{"-l"}, nil, []string{"geomean"}, "p95,p99", false},
+	}
+	for _, tc := range cases {
+		_, stderr, err := runStatsIn(t, dir, "", append(append([]string{"--html"}, tc.args...), input)...)
+		if err != nil {
+			t.Fatalf("%v: run failed: %v\n%s", tc.args, err, stderr)
+		}
+		page, err := os.ReadFile(filepath.Join(dir, "data.html"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		report := reportJSON(t, string(page))
+		rows := reportRows(t, report)
+		for _, kind := range append(always, tc.present...) {
+			if findRow(rows, kind) == nil {
+				t.Errorf("%v: row %q missing", tc.args, kind)
+			}
+		}
+		for _, kind := range tc.absent {
+			if findRow(rows, kind) != nil {
+				t.Errorf("%v: row %q should not appear", tc.args, kind)
+			}
+		}
+		var pcts []string
+		for _, row := range rows {
+			if row["kind"] == "percentile" {
+				label := strings.TrimSuffix(strings.TrimPrefix(row["label"].(string), "Percentile ("), ")")
+				pcts = append(pcts, label)
+			}
+		}
+		if got := strings.Join(pcts, ","); got != tc.percentiles {
+			t.Errorf("%v: percentiles = %s, want %s", tc.args, got, tc.percentiles)
+		}
+		hasFootnote := strings.Contains(string(page), `<p class="footnote">* `+trimFootnote+"</p>")
+		if hasFootnote != tc.footnote || (report["footnote"] != nil) != tc.footnote {
+			t.Errorf("%v: footnote shown = %v, want %v", tc.args, hasFootnote, tc.footnote)
+		}
+	}
+}

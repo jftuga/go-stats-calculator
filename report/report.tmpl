@@ -7,6 +7,7 @@
 <style>{{.CSS}}</style>
 </head>
 <body>
+<main class="report">
 <header class="report-header">
 <h1>{{.Input}}</h1>
 <p class="meta">Generated {{.Generated}} by stats {{.Version}}</p>
@@ -24,7 +25,149 @@
 <p class="banner">(trimmed dataset: {{.TrimDatasetPct}}% from each tail, {{.TrimOrigN}} → {{.Count}} values)</p>
 {{- end}}
 </header>
+{{- range .Report.Sections}}
+<section class="card">
+<h2>{{.Title}}</h2>
+<dl class="rows">
+{{- range .Rows}}
+<div class="row">
+<dt><button type="button" class="term" popovertarget="def-{{.ID}}">{{.Label}}</button></dt>
+<dd class="value value-{{.Kind}}">{{if .List}}{{template "list" .List}}{{else}}{{.Value}}{{end}}</dd>
+</div>
+{{- end}}
+</dl>
+{{- range .Rows}}
+<div popover="auto" id="def-{{.ID}}" class="def">
+<h3>{{.Label}}</h3>{{template "definition" .Kind}}
+<p class="def-data"><span class="def-key">This dataset:</span> {{if .List}}{{template "count" .List.Count}}{{else}}{{.Value}}{{end}}</p>
+{{- if .Reading}}
+<p class="def-data"><span class="def-key">Reading:</span> {{.Reading}}</p>
+{{- end}}
+</div>
+{{- end}}
+</section>
+{{- end}}
+{{- with .Report.Footnote}}
+<p class="footnote">* {{.}}</p>
+{{- end}}
+</main>
 <script type="application/json" id="report-data">{{.Data}}</script>
 <script>{{.JS}}</script>
 </body>
 </html>
+{{- define "list"}}
+<details class="list"{{if le .Count 10}} open{{end}}>
+<summary>{{template "count" .Count}}
+{{- if .Tail}} (showing {{len .Head}} lowest and {{len .Tail}} highest of {{.Count}})
+{{- else if lt (len .Head) .Count}} (showing first {{len .Head}} of {{.Count}})
+{{- end}}</summary>
+<ul class="values">
+{{- range .Head}}<li>{{.}}</li>{{end}}
+{{- if .Tail}}<li class="gap" aria-hidden="true">…</li>{{range .Tail}}<li>{{.}}</li>{{end}}{{end -}}
+</ul>
+</details>
+{{- end}}
+{{- define "count"}}{{.}} {{if eq . 1}}value{{else}}values{{end}}{{end}}
+{{- define "definition"}}
+{{- if eq . "count"}}
+<p>The number of values the statistics are computed from, after any -l transform or -T trim.</p>
+<p class="formula">n</p>
+{{- else if eq . "skipped"}}
+<p>Input lines that could not be read as a finite number and were left out. Blank lines are ignored and not counted.</p>
+<p class="formula">skipped = invalid lines</p>
+{{- else if eq . "distinct"}}
+<p>The number of different values, and the share of values that repeat an earlier one.</p>
+<p class="formula">duplicated % = (n − distinct) / n × 100</p>
+{{- else if eq . "sum"}}
+<p>The total of all values.</p>
+<p class="formula">Σ xᵢ</p>
+{{- else if eq . "min"}}
+<p>The smallest value.</p>
+<p class="formula">x₍₁₎, the first sorted value</p>
+{{- else if eq . "max"}}
+<p>The largest value.</p>
+<p class="formula">x₍ₙ₎, the last sorted value</p>
+{{- else if eq . "mean"}}
+<p>The arithmetic average: the balance point of the data, pulled toward extreme values.</p>
+<p class="formula">x̄ = Σ xᵢ / n</p>
+{{- else if eq . "stderr"}}
+<p>The standard error of the mean: how much the mean would vary between samples of this size.</p>
+<p class="formula">SE = s / √n</p>
+{{- else if eq . "ci95"}}
+<p>A 95% confidence interval for the mean from the normal approximation. Shown only when n ≥ 2 and SE &gt; 0.</p>
+<p class="formula">x̄ ± 1.96 · SE</p>
+{{- else if eq . "geomean"}}
+<p>The nth root of the product of the values, suited to rates and ratios. Shown only when every value is positive and -l is not in use.</p>
+<p class="formula">exp( Σ ln xᵢ / n )</p>
+{{- else if eq . "trimmedmean"}}
+<p>The mean after dropping the given percentage of values from each end of the sorted data, which resists outliers.</p>
+<p class="formula">mean of x₍k+1₎ … x₍n−k₎, k = ⌊n · t / 100⌋</p>
+{{- else if eq . "ema"}}
+<p>The exponential moving average at the last value, weighting recent values more heavily. It depends on input order.</p>
+<p class="formula">EMA₁ = x₁; EMAᵢ = α·xᵢ + (1 − α)·EMAᵢ₋₁, α = 2 / (span + 1)</p>
+{{- else if eq . "median"}}
+<p>The middle of the sorted data: half the values lie at or below it. Unaffected by extreme values.</p>
+<p class="formula">50th percentile, interpolated at rank 0.5 · (n − 1)</p>
+{{- else if eq . "mode"}}
+<p>The most frequent value or values. When no value repeats, the densest of the -b equal-width bins from min to max (at most n bins) is reported instead, so it will not match a differently binned histogram.</p>
+<p class="formula">argmax count(x); otherwise the bin with the most values</p>
+{{- else if eq . "stddev"}}
+<p>The sample standard deviation: the typical distance of values from the mean, in the data's units. 0 for a single value.</p>
+<p class="formula">s = √( Σ (xᵢ − x̄)² / (n − 1) )</p>
+{{- else if eq . "variance"}}
+<p>The sample variance: the average squared distance from the mean, using n − 1.</p>
+<p class="formula">s² = Σ (xᵢ − x̄)² / (n − 1)</p>
+{{- else if eq . "mad"}}
+<p>The median absolute deviation, scaled so it estimates the standard deviation for normal data while resisting outliers.</p>
+<p class="formula">MAD = 1.4826 · median( |xᵢ − median| )</p>
+{{- else if eq . "cv"}}
+<p>The coefficient of variation: the standard deviation relative to the size of the mean. N/A when |x̄| &lt; 1e-10; not meaningful when the data has negative values.</p>
+<p class="formula">CV = s / |x̄| × 100%</p>
+<p class="bands">Under 15% low, 15% to under 30% moderate, 30% and above high variability.</p>
+{{- else if eq . "q1"}}
+<p>The first quartile: a quarter of the values lie at or below it.</p>
+<p class="formula">25th percentile, interpolated at rank 0.25 · (n − 1)</p>
+{{- else if eq . "q3"}}
+<p>The third quartile: three quarters of the values lie at or below it.</p>
+<p class="formula">75th percentile, interpolated at rank 0.75 · (n − 1)</p>
+{{- else if eq . "percentile"}}
+<p>The value below which p% of the data lies, interpolated linearly between the two nearest sorted values.</p>
+<p class="formula">r = p/100 · (n − 1); x₍⌊r⌋₎ + (r − ⌊r⌋) · (x₍⌈r⌉₎ − x₍⌊r⌋₎), ranks from 0</p>
+{{- else if eq . "iqr"}}
+<p>The interquartile range: the spread of the middle half of the data.</p>
+<p class="formula">IQR = Q3 − Q1</p>
+{{- else if eq . "skewness"}}
+<p>The adjusted Fisher-Pearson skewness: positive when the right tail is longer, negative when the left is. Reported as 0 when n &lt; 3 or s = 0.</p>
+<p class="formula">G₁ = n / ((n − 1)(n − 2)) · Σ (xᵢ − x̄)³ / s³</p>
+<p class="bands">|G₁| under 0.5 fairly symmetrical, 0.5 to under 1 moderately skewed, 1 and above highly skewed.</p>
+{{- else if eq . "kurtosis"}}
+<p>The sample excess kurtosis: tail weight relative to a normal distribution, which scores 0. Reported as 0 when n &lt; 4 or s = 0.</p>
+<p class="formula">G₂ = n(n + 1) / ((n − 1)(n − 2)(n − 3)) · Σ ((xᵢ − x̄)/s)⁴ − 3(n − 1)² / ((n − 2)(n − 3))</p>
+<p class="bands">Below −1 platykurtic, −1 to 1 mesokurtic, above 1 leptokurtic.</p>
+{{- else if eq . "symmetry"}}
+<p>Whether the sorted data is an exact mirror image of itself about the midpoint of min and max, within a tolerance of 1e-9 · max(1, |min|, |max|), which is absolute for data whose values are all below 1 in magnitude. Requires at least 3 values.</p>
+<p class="formula">x₍ᵢ₎ + x₍ₙ₊₁₋ᵢ₎ = min + max for every i</p>
+{{- else if eq . "outliers"}}
+<p>Values outside Tukey's fences, k interquartile ranges beyond the quartiles; k is set with -k (default 1.5).</p>
+<p class="formula">x &lt; Q1 − k · IQR or x &gt; Q3 + k · IQR</p>
+{{- else if eq . "zoutliers"}}
+<p>Values more than the -z threshold of standard deviations from the mean. N/A when s = 0.</p>
+<p class="formula">|xᵢ − x̄| / s &gt; z</p>
+{{- else if eq . "modzoutliers"}}
+<p>The Iglewicz-Hoaglin modified z-score, built on the median and the unscaled MAD, which extreme values cannot inflate the way they inflate the standard deviation. N/A when the MAD is 0.</p>
+<p class="formula">|0.6745 · (xᵢ − median) / median( |xⱼ − median| )| &gt; z</p>
+{{- else if eq . "histogram"}}
+<p>Counts in -b equal-width bins from min to max (at most n bins), drawn as eight bar heights scaled to the fullest bin; any occupied bin is at least one step above empty.</p>
+<p class="formula">bin = min( ⌊(x − min) / ((max − min) / bins)⌋, bins − 1 )</p>
+{{- else if eq . "trendline"}}
+<p>The data in input order, split into -b nearly equal chunks; each chunk's mean is drawn as one of eight heights from min to max. Hidden under -T.</p>
+<p class="formula">level = round( 7 · (chunk mean − min) / (max − min) )</p>
+{{- else if eq . "autocorrelation"}}
+<p>The lag-1 autocorrelation: how strongly each value predicts the next, in input order. Needs n ≥ 3 and s &gt; 0; hidden under -T.</p>
+<p class="formula">r₁ = Σᵢ₌₁ⁿ⁻¹ (xᵢ − x̄)(xᵢ₊₁ − x̄) / Σᵢ₌₁ⁿ (xᵢ − x̄)²</p>
+<p class="bands">|r₁| under 0.2 none, under 0.5 weak, under 0.8 moderate, 0.8 and above strong serial dependence.</p>
+{{- else if eq . "inputorder"}}
+<p>Whether the values arrived ascending, descending, all equal (constant), or in neither order (unordered). Ties are allowed. Sorted input makes order-based statistics reflect the sort. Needs n ≥ 2; hidden under -T.</p>
+<p class="formula">ascending: xᵢ₊₁ ≥ xᵢ for every i; descending: xᵢ₊₁ ≤ xᵢ for every i</p>
+{{- end}}
+{{- end}}
