@@ -696,3 +696,49 @@ func TestRenderReportDistributionCharts(t *testing.T) {
 		last = i
 	}
 }
+
+// TestRenderReportControls checks that the theme and width controls each
+// appear exactly once, inside the header, and that the script applying the
+// remembered choices is embedded once in the head.
+func TestRenderReportControls(t *testing.T) {
+	_, html := renderTestReport(t, testData, nil, 0, 0, 0)
+	_, rest, found := strings.Cut(html, `<header class="report-header">`)
+	header, _, closed := strings.Cut(rest, "</header>")
+	if !found || !closed {
+		t.Fatal("rendered page has no report header")
+	}
+	controls := []string{
+		`class="control theme-toggle"`,
+		`role="group" aria-label="Page width"`,
+		`data-width-choice="normal"`,
+		`data-width-choice="wide"`,
+		`data-width-choice="full"`,
+	}
+	for _, control := range controls {
+		if n := strings.Count(header, control); n != 1 {
+			t.Errorf("header has %d of %q, want 1", n, control)
+		}
+		if n := strings.Count(html, control); n != 1 {
+			t.Errorf("page has %d of %q, want 1", n, control)
+		}
+	}
+	if n := strings.Count(header, "aria-pressed="); n != 4 {
+		t.Errorf("header has %d aria-pressed buttons, want 4", n)
+	}
+
+	themeJS, err := reportFS.ReadFile("report/theme.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, _, found := strings.Cut(html, "</head>")
+	if !found {
+		t.Fatal("rendered page has no head")
+	}
+	script := "<script>" + string(themeJS) + "</script>"
+	if n := strings.Count(head, script); n != 1 {
+		t.Errorf("head has %d copies of theme.js, want 1", n)
+	}
+	if n := strings.Count(html, script); n != 1 {
+		t.Errorf("page has %d copies of theme.js, want 1", n)
+	}
+}

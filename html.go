@@ -93,11 +93,12 @@ type reportData struct {
 	Distribution distributionCharts `json:"distribution"`
 }
 
-// reportPage is the value passed to the report template. CSS and JS carry
-// only the embedded report files; Data is the already-marshaled Report.
+// reportPage is the value passed to the report template. CSS, JS and ThemeJS
+// carry only the embedded report files; Data is the already-marshaled Report.
 type reportPage struct {
 	CSS            template.CSS
 	JS             template.JS
+	ThemeJS        template.JS
 	Report         reportData
 	Data           json.RawMessage
 	Input          string
@@ -307,6 +308,10 @@ func buildReportPage(s *Stats, data []float64, inputArg string, now time.Time, n
 	if err != nil {
 		return nil, err
 	}
+	themeJS, err := reportFS.ReadFile("report/theme.js")
+	if err != nil {
+		return nil, err
+	}
 
 	input := "stdin"
 	if inputArg != "" && inputArg != "-" {
@@ -315,6 +320,7 @@ func buildReportPage(s *Stats, data []float64, inputArg string, now time.Time, n
 	page := &reportPage{
 		CSS:            template.CSS(css),
 		JS:             template.JS(js),
+		ThemeJS:        template.JS(themeJS),
 		Report:         report,
 		Data:           encoded,
 		Input:          input,

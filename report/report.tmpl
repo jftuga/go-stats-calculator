@@ -5,11 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Input}} - stats report</title>
 <style>{{.CSS}}</style>
+<script>{{.ThemeJS}}</script>
 </head>
 <body>
 <main class="report">
 <header class="report-header">
+<div class="header-top">
 <h1>{{.Input}}</h1>
+<div class="controls">
+<div class="width-group" role="group" aria-label="Page width">
+<button type="button" class="control" data-width-choice="normal" aria-label="Normal width" title="Normal width" aria-pressed="true"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="3" width="16" height="14" rx="1.5"/><path d="M7 7.5h6M7 10h6M7 12.5h6"/></svg></button>
+<button type="button" class="control" data-width-choice="wide" aria-label="Wide width" title="Wide width" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="3" width="16" height="14" rx="1.5"/><path d="M5 7.5h10M5 10h10M5 12.5h10"/></svg></button>
+<button type="button" class="control" data-width-choice="full" aria-label="Full width" title="Full width" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="3" width="16" height="14" rx="1.5"/><path d="M3.5 7.5h13M3.5 10h13M3.5 12.5h13"/></svg></button>
+</div>
+<button type="button" class="control theme-toggle" aria-label="Dark theme" title="Switch to the dark theme" aria-pressed="false"><svg class="icon-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M16.5 12.2A7 7 0 0 1 7.8 3.5a7 7 0 1 0 8.7 8.7z"/></svg><svg class="icon-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.5"/><path d="M10 1.5v2M10 16.5v2M1.5 10h2M16.5 10h2M4 4l1.4 1.4M14.6 14.6L16 16M4 16l1.4-1.4M14.6 5.4L16 4"/></svg></button>
+</div>
+</div>
 <p class="meta">Generated {{.Generated}} by <a href="{{.URL}}" target="_blank" rel="noopener noreferrer">stats {{.Version}}</a></p>
 {{- if .Options}}
 <ul class="chips" aria-label="Active options">

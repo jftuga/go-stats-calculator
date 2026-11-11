@@ -1,77 +1,49 @@
 :root {
   color-scheme: light dark;
-  --bg: #f6f8fa;
-  --fg: #1f2328;
-  --muted: #59636e;
-  --card-bg: #ffffff;
-  --card-border: #d1d9e0;
-  --rule: #e6eaef;
-  --accent: #0969da;
-  --chip-bg: #eef1f4;
-  --chip-border: #d1d9e0;
-  --banner-bg: #fff8c5;
-  --banner-border: #d4a72c;
-  --shadow: 0 6px 24px rgba(31, 35, 40, 0.18);
-  --warn: #9a6700;
+  --bg: light-dark(#f6f8fa, #0d1117);
+  --fg: light-dark(#1f2328, #e6edf3);
+  --muted: light-dark(#59636e, #9198a1);
+  --card-bg: light-dark(#ffffff, #151b23);
+  --card-border: light-dark(#d1d9e0, #3d444d);
+  --rule: light-dark(#e6eaef, #262c36);
+  --accent: light-dark(#0969da, #4493f8);
+  --chip-bg: light-dark(#eef1f4, #212830);
+  --chip-border: light-dark(#d1d9e0, #3d444d);
+  --banner-bg: light-dark(#fff8c5, #2e2a1a);
+  --banner-border: light-dark(#d4a72c, #9e6a03);
+  --shadow: 0 6px 24px light-dark(rgba(31, 35, 40, 0.18), rgba(0, 0, 0, 0.6));
+  --warn: light-dark(#9a6700, #d29922);
 
   /* Charts. Marker identity is carried by shape and label; color only helps. */
-  --chart-axis: #59636e;
-  --chart-line: #8c959f;
-  --chart-fill: #0969da;
-  --chart-fill-soft: rgba(9, 105, 218, 0.18);
-  --chart-shade: rgba(9, 105, 218, 0.08);
-  --chart-dup: #bf8700;
-  --chart-halo: #ffffff;
-  --band-ok: #b7e4c7;
-  --band-mid: #fde2a7;
-  --band-high: #f7c1bd;
-  --band-na: #e6eaef;
-  --mk-mean: #0969da;
-  --mk-median: #1a7f37;
-  --mk-mode: #8250df;
-  --mk-geomean: #bc4c00;
-  --mk-trimmedmean: #bf3989;
-  --ci: rgba(9, 105, 218, 0.35);
-  --curve: #cf222e;
-  --ema: #bc4c00;
+  --chart-axis: light-dark(#59636e, #9198a1);
+  --chart-line: light-dark(#8c959f, #656c76);
+  --chart-fill: light-dark(#0969da, #4493f8);
+  --chart-fill-soft: light-dark(rgba(9, 105, 218, 0.18), rgba(68, 147, 248, 0.25));
+  --chart-shade: light-dark(rgba(9, 105, 218, 0.08), rgba(68, 147, 248, 0.1));
+  --chart-dup: light-dark(#bf8700, #d29922);
+  --chart-halo: light-dark(#ffffff, #151b23);
+  --band-ok: light-dark(#b7e4c7, #1f4d2e);
+  --band-mid: light-dark(#fde2a7, #5a4513);
+  --band-high: light-dark(#f7c1bd, #6e2a26);
+  --band-na: light-dark(#e6eaef, #262c36);
+  --mk-mean: light-dark(#0969da, #4493f8);
+  --mk-median: light-dark(#1a7f37, #3fb950);
+  --mk-mode: light-dark(#8250df, #ab7df8);
+  --mk-geomean: light-dark(#bc4c00, #f0883e);
+  --mk-trimmedmean: light-dark(#bf3989, #f778ba);
+  --ci: light-dark(rgba(9, 105, 218, 0.35), rgba(68, 147, 248, 0.45));
+  --curve: light-dark(#cf222e, #ff7b72);
+  --ema: light-dark(#bc4c00, #f0883e);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0d1117;
-    --fg: #e6edf3;
-    --muted: #9198a1;
-    --card-bg: #151b23;
-    --card-border: #3d444d;
-    --rule: #262c36;
-    --accent: #4493f8;
-    --chip-bg: #212830;
-    --chip-border: #3d444d;
-    --banner-bg: #2e2a1a;
-    --banner-border: #9e6a03;
-    --shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
-    --warn: #d29922;
+/* The day/night button's choice, set by theme.js before first paint, picks
+   one side of every light-dark() token above. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
 
-    --chart-axis: #9198a1;
-    --chart-line: #656c76;
-    --chart-fill: #4493f8;
-    --chart-fill-soft: rgba(68, 147, 248, 0.25);
-    --chart-shade: rgba(68, 147, 248, 0.1);
-    --chart-dup: #d29922;
-    --chart-halo: #151b23;
-    --band-ok: #1f4d2e;
-    --band-mid: #5a4513;
-    --band-high: #6e2a26;
-    --band-na: #262c36;
-    --mk-mean: #4493f8;
-    --mk-median: #3fb950;
-    --mk-mode: #ab7df8;
-    --mk-geomean: #f0883e;
-    --mk-trimmedmean: #f778ba;
-    --ci: rgba(68, 147, 248, 0.45);
-    --curve: #ff7b72;
-    --ema: #f0883e;
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 body {
@@ -87,10 +59,144 @@ body {
   margin: 0 auto;
 }
 
+/* Wide and Full, chosen with the header's width buttons. Full keeps only a
+   16px gutter at each side. */
+:root[data-width="wide"] .report {
+  max-width: 80rem;
+}
+
+/* Only where the width buttons show: below that every width must look the
+   same, and the 24px gutter stays until the narrow-screen rule. */
+@media (width > 55rem) {
+  :root[data-width="full"] body {
+    padding-inline: 16px;
+  }
+}
+
+:root[data-width="full"] .report {
+  max-width: none;
+}
+
+.header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
 .report-header h1 {
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0 0 0.25rem;
   font-size: 1.6rem;
   overflow-wrap: anywhere;
+}
+
+/* Page controls: the width group and the day/night button. */
+.controls {
+  display: flex;
+  flex: none;
+  gap: 0.5rem;
+}
+
+.width-group {
+  display: flex;
+}
+
+.control {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--chip-border);
+  border-radius: 6px;
+  background: var(--card-bg);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.width-group .control {
+  border-radius: 0;
+}
+
+.width-group .control + .control {
+  margin-left: -1px;
+}
+
+.width-group .control:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.width-group .control:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.control:hover {
+  color: var(--fg);
+}
+
+.control:focus-visible {
+  position: relative;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.width-group .control[aria-pressed="true"] {
+  background: var(--chip-bg);
+  color: var(--accent);
+}
+
+.control svg {
+  display: block;
+  width: 1.1rem;
+  height: 1.1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The theme button's icon shows what a click does: a moon in the light
+   theme, a sun in the dark one. */
+.theme-toggle .icon-sun,
+:root[data-theme="dark"] .icon-moon {
+  display: none;
+}
+
+:root[data-theme="dark"] .icon-sun {
+  display: block;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .icon-moon {
+    display: none;
+  }
+
+  :root:not([data-theme="light"]) .icon-sun {
+    display: block;
+  }
+}
+
+/* Below the Normal column and its gutters every width looks the same. */
+@media (max-width: 55rem) {
+  .width-group {
+    display: none;
+  }
+}
+
+/* Paper is light: a stored or OS dark theme would print light text that
+   vanishes once the browser drops backgrounds. */
+@media print {
+  .controls {
+    display: none;
+  }
+
+  :root,
+  :root[data-theme] {
+    color-scheme: light;
+  }
 }
 
 .meta {

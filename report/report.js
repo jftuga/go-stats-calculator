@@ -3,11 +3,15 @@
 // report.js draws the stats report's interactive parts from the JSON data
 // block Go embeds in the page: definition popovers, and charts built as SVG
 // with createElementNS and textContent only (no markup is ever parsed from a
-// string), so no value or file name can be interpreted as markup. Sections, in order: shared helpers,
-// definitions, the chart kit (SVG, scales, axes, labels, tooltip, animation,
-// mounting, x-y plots), the charts of report sections 1 to 4, and startup.
+// string), so no value or file name can be interpreted as markup. Sections,
+// in order: shared helpers, definitions, page controls (theme and width), the
+// chart kit (SVG, scales, axes, labels, tooltip, animation, mounting, x-y
+// plots), the charts of report sections 1 to 4, and startup.
 
 // ===== Shared helpers =====================================================
+
+// Fired on window after the charts redraw for a resize or width change.
+const CHARTS_REDRAWN = "chartsredrawn";
 
 // Space between a label and its popover, and the minimum margin kept between
 // a popover or tooltip and the viewport edge, in CSS pixels.
@@ -87,6 +91,83 @@ function initDefinitions() {
   };
   window.addEventListener("resize", reposition);
   window.addEventListener("scroll", reposition, { passive: true });
+  // Charts redraw after a debounced resize and can change height, moving the
+  // label; place the popover again once they have.
+  window.addEventListener(CHARTS_REDRAWN, reposition);
+}
+
+// ===== Page controls ======================================================
+
+// localStorage keys of the remembered choices; theme.js applies them before
+// first paint.
+const THEME_KEY = "stats-report-theme";
+const WIDTH_KEY = "stats-report-width";
+const darkScheme = window.matchMedia("(prefers-color-scheme: dark)");
+
+// Remembers value under key. Without storage (some file:// pages) the choice
+// still applies to the current view.
+function storeSetting(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Not remembered; nothing else depends on it.
+  }
+}
+
+// Returns the theme in effect: the day/night button's choice, otherwise the
+// OS preference.
+function currentTheme() {
+  return document.documentElement.dataset.theme || (darkScheme.matches ? "dark" : "light");
+}
+
+// Shows the theme in effect on the day/night button, a toggle for the dark
+// theme, and names what a click does in its title. The icon follows in CSS.
+function syncThemeButton(button) {
+  const dark = currentTheme() === "dark";
+  button.setAttribute("aria-pressed", String(dark));
+  button.title = dark ? "Switch to the light theme" : "Switch to the dark theme";
+}
+
+// Presses the width button of the width in effect and releases the others.
+function syncWidthButtons(buttons) {
+  const width = document.documentElement.dataset.width || "normal";
+  for (const button of buttons) {
+    button.setAttribute("aria-pressed", String(button.dataset.widthChoice === width));
+  }
+}
+
+// Connects the day/night button and the Normal, Wide and Full buttons. A
+// theme switch needs no redraw, since charts take every color from CSS. A
+// width switch goes through the resize path, which redraws the charts at
+// their new width (the histogram keeps its bin count) and re-places an open
+// popover.
+function initControls() {
+  const root = document.documentElement;
+  const themeButton = document.querySelector(".theme-toggle");
+  syncThemeButton(themeButton);
+  themeButton.addEventListener("click", () => {
+    const theme = currentTheme() === "dark" ? "light" : "dark";
+    root.dataset.theme = theme;
+    storeSetting(THEME_KEY, theme);
+    syncThemeButton(themeButton);
+  });
+  darkScheme.addEventListener("change", () => syncThemeButton(themeButton));
+
+  const widthButtons = document.querySelectorAll("[data-width-choice]");
+  syncWidthButtons(widthButtons);
+  for (const button of widthButtons) {
+    button.addEventListener("click", () => {
+      const width = button.dataset.widthChoice;
+      if (width === "normal") {
+        delete root.dataset.width;
+      } else {
+        root.dataset.width = width;
+      }
+      storeSetting(WIDTH_KEY, width);
+      syncWidthButtons(widthButtons);
+      window.dispatchEvent(new Event("resize"));
+    });
+  }
 }
 
 // ===== Chart kit: elements ================================================
@@ -631,7 +712,10 @@ function mountCharts(data, drawers) {
   window.addEventListener("resize", () => {
     hideTooltip();
     clearTimeout(timer);
-    timer = setTimeout(() => mounts.forEach((m) => renderMount(m, data, false)), 150);
+    timer = setTimeout(() => {
+      mounts.forEach((m) => renderMount(m, data, false));
+      window.dispatchEvent(new Event(CHARTS_REDRAWN));
+    }, 150);
   });
   window.addEventListener("scroll", hideTooltip, { passive: true });
 }
@@ -1763,6 +1847,8 @@ const CHART_DRAWERS = {
   lag: drawLag,
 };
 
+// The controls come first, so they work even if the data block cannot be read.
+initControls();
 const reportData = loadReportData();
 useMinusSigns(reportData.summary);
 useMinusSigns(reportData.distribution);
