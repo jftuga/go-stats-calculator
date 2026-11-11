@@ -238,7 +238,7 @@ func TestRenderReportHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 11, 10, 14, 30, 5, 0, time.UTC)
-	page, err := buildReportPage(s, "dir/a<b>.txt", now, 20, true)
+	page, err := buildReportPage(s, testData, "dir/a<b>.txt", now, 20, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +275,7 @@ func TestRenderReportHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err = buildReportPage(s, "-", now, defaultNumBins, false)
+	page, err = buildReportPage(s, testData, "-", now, defaultNumBins, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +317,7 @@ func renderTestReport(t *testing.T, data []float64, percentiles []float64, zThre
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := buildReportPage(s, "data.txt", time.Date(2026, 11, 10, 14, 30, 5, 0, time.UTC), defaultNumBins, false)
+	page, err := buildReportPage(s, data, "data.txt", time.Date(2026, 11, 10, 14, 30, 5, 0, time.UTC), defaultNumBins, false)
 	if err != nil {
 		t.Fatal(err)
 	}

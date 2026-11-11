@@ -88,6 +88,7 @@ type reportData struct {
 	Stats    reportStats     `json:"stats"`
 	Sections []reportSection `json:"sections"`
 	Footnote string          `json:"footnote,omitempty"`
+	Charts   chartData       `json:"charts"`
 }
 
 // reportPage is the value passed to the report template. CSS and JS carry
@@ -266,18 +267,21 @@ func newReportSections(s *Stats) []reportSection {
 	return sections
 }
 
-// buildReportPage assembles the template value for a report. It marshals the
-// chart data itself, because html/template hides a marshal error (such as a
-// NaN or Inf) inside a JSON script block and renders null instead.
-func buildReportPage(s *Stats, inputArg string, now time.Time, numBins int, logTransformed bool) (*reportPage, error) {
+// buildReportPage assembles the template value for a report from the
+// statistics s and the numbers they were computed from, in input order (data
+// is sorted under -T). It marshals the chart data itself, because
+// html/template hides a marshal error (such as a NaN or Inf) inside a JSON
+// script block and renders null instead.
+func buildReportPage(s *Stats, data []float64, inputArg string, now time.Time, numBins int, logTransformed bool) (*reportPage, error) {
 	report := reportData{
 		Stats:    newReportStats(s, logTransformed),
 		Sections: newReportSections(s),
+		Charts:   newChartData(data, s),
 	}
 	if s.TrimDatasetPct > 0 {
 		report.Footnote = trimFootnote
 	}
-	data, err := json.Marshal(report)
+	encoded, err := json.Marshal(report)
 	if err != nil {
 		return nil, fmt.Errorf("encoding report data: %w", err)
 	}
@@ -298,7 +302,7 @@ func buildReportPage(s *Stats, inputArg string, now time.Time, numBins int, logT
 		CSS:            template.CSS(css),
 		JS:             template.JS(js),
 		Report:         report,
-		Data:           data,
+		Data:           encoded,
 		Input:          input,
 		Generated:      now.Format("2006-01-02 15:04:05 MST"),
 		Version:        PgmVersion,
@@ -352,10 +356,10 @@ func writeFileAtomic(path string, content []byte) error {
 	return err
 }
 
-// writeHTMLReport builds, renders and writes the report for s to outPath.
-// Nothing is written unless every earlier step succeeds.
-func writeHTMLReport(outPath string, s *Stats, inputArg string, now time.Time, numBins int, logTransformed bool) error {
-	page, err := buildReportPage(s, inputArg, now, numBins, logTransformed)
+// writeHTMLReport builds, renders and writes the report for s and its input
+// data to outPath. Nothing is written unless every earlier step succeeds.
+func writeHTMLReport(outPath string, s *Stats, data []float64, inputArg string, now time.Time, numBins int, logTransformed bool) error {
+	page, err := buildReportPage(s, data, inputArg, now, numBins, logTransformed)
 	if err != nil {
 		return err
 	}

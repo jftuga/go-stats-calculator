@@ -298,7 +298,7 @@ func main() {
 	// The report is written before stdout, so a downstream "head" closing the
 	// pipe cannot prevent it, and a write failure never follows a full report.
 	if *htmlOutput {
-		if err := writeHTMLReport(htmlPath, stats, inputArg, now, *numBins, *logTransform); err != nil {
+		if err := writeHTMLReport(htmlPath, stats, numbers, inputArg, now, *numBins, *logTransform); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
