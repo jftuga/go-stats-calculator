@@ -5,8 +5,11 @@ import (
 	"bytes"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
+	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
@@ -350,22 +353,23 @@ func renderReport(page *reportPage) ([]byte, error) {
 // writeFileAtomic writes content to a temporary file in the target's directory
 // and renames it over the target, so a failure never leaves a truncated file
 // or destroys the previous one, and a symlink at the target is replaced
-// rather than followed.
+// rather than followed. A new file gets 0666 less the umask, like any file
+// the shell creates; replacing a regular file keeps that file's permissions,
+// so a report made private stays private.
 func writeFileAtomic(path string, content []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	tmp, err := createTempUmask(path)
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
-	_, writeErr := tmp.Write(content)
-	closeErr := tmp.Close()
-	err = writeErr
+	_, err = tmp.Write(content)
 	if err == nil {
-		err = closeErr
+		if old, statErr := os.Lstat(path); statErr == nil && old.Mode().IsRegular() {
+			err = tmp.Chmod(old.Mode().Perm())
+		}
 	}
-	if err == nil {
-		// CreateTemp uses 0600; a report is an ordinary readable file.
-		err = os.Chmod(tmpName, 0o644)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
 	}
 	if err == nil {
 		err = os.Rename(tmpName, path)
@@ -374,6 +378,20 @@ func writeFileAtomic(path string, content []byte) error {
 		os.Remove(tmpName)
 	}
 	return err
+}
+
+// createTempUmask creates a new file beside path named
+// ".<base>.tmp-<random>". Unlike os.CreateTemp, which always uses 0600, it
+// asks for 0666 and so lets the umask decide the permissions.
+func createTempUmask(path string) (*os.File, error) {
+	prefix := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
+	for range 10000 {
+		f, err := os.OpenFile(prefix+strconv.FormatUint(rand.Uint64(), 36), os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
+		if !errors.Is(err, fs.ErrExist) {
+			return f, err
+		}
+	}
+	return nil, &fs.PathError{Op: "createtemp", Path: prefix + "*", Err: fs.ErrExist}
 }
 
 // writeHTMLReport builds, renders and writes the report for s and its input

@@ -616,28 +616,54 @@ function createMotion(enabled) {
   };
 }
 
-// Plays animations once, when element first scrolls into view. Returns the
-// observer so a redraw can cancel it, or null.
+// One finisher per chart whose animations have not yet ended. Printing runs
+// them all, since a chart that has not scrolled into view would otherwise
+// print in its first frame: bars flat, dots transparent, needles at zero.
+const unfinishedMotion = new Set();
+window.addEventListener("beforeprint", () => {
+  unfinishedMotion.forEach((finish) => finish());
+});
+
+// Plays animations once, when element first scrolls into view, or ends them
+// at once when the page is printed first. Returns a function that stops
+// watching, for a redraw that replaces the chart, or null.
 function playOnFirstView(element, animations) {
   if (animations.length === 0) {
     return null;
   }
-  const play = () => animations.forEach((a) => a.play());
+  let observer = null;
+  const stop = () => {
+    if (observer) {
+      observer.disconnect();
+    }
+    unfinishedMotion.delete(finish);
+  };
+  const finish = () => {
+    stop();
+    animations.forEach((a) => a.finish());
+  };
+  const play = () => {
+    if (observer) {
+      observer.disconnect();
+    }
+    animations.forEach((a) => a.play());
+    Promise.all(animations.map((a) => a.finished)).then(stop, stop);
+  };
+  unfinishedMotion.add(finish);
   if (typeof IntersectionObserver !== "function") {
     play();
-    return null;
+    return stop;
   }
-  const observer = new IntersectionObserver(
+  observer = new IntersectionObserver(
     (entries) => {
       if (entries.some((e) => e.isIntersecting)) {
-        observer.disconnect();
         play();
       }
     },
     { threshold: 0.2 },
   );
   observer.observe(element);
-  return observer;
+  return stop;
 }
 
 // Slides el horizontally from dx pixels away into its place.
@@ -678,9 +704,9 @@ function renderMount(mount, data, animate) {
     return;
   }
   mount.width = width;
-  if (mount.observer) {
-    mount.observer.disconnect();
-    mount.observer = null;
+  if (mount.stopMotion) {
+    mount.stopMotion();
+    mount.stopMotion = null;
   }
   mount.el.replaceChildren();
   const motion = createMotion(animate);
@@ -692,7 +718,7 @@ function renderMount(mount, data, animate) {
     console.error(err);
     return;
   }
-  mount.observer = playOnFirstView(mount.el, motion.animations);
+  mount.stopMotion = playOnFirstView(mount.el, motion.animations);
 }
 
 // Draws every [data-chart] container with its drawing function, and redraws
@@ -702,7 +728,7 @@ function mountCharts(data, drawers) {
   for (const el of document.querySelectorAll("[data-chart]")) {
     const draw = drawers[el.dataset.chart];
     if (draw) {
-      mounts.push({ el, draw, width: 0, observer: null });
+      mounts.push({ el, draw, width: 0, stopMotion: null });
     }
   }
   for (const mount of mounts) {
@@ -1519,14 +1545,15 @@ function drawECDF({ el, data, width, motion }) {
   const leaders = svgEl(markLayer, "g");
   const placed = []; // label boxes already placed, as [left, top, right, bottom]
   const clashes = (x0, baseline, w) => placed.some(([l, t, r, b]) => x0 < r + 3 && x0 + w > l - 3 && baseline - 10 < b && baseline + 1 > t);
-  // In exact mode a mark sits on the step at its value: percentiles
-  // interpolate between data values, so at small n the share of values at or
-  // below p99 can be far from 99% (2 of 3 at n = 3). The quantile mode's
-  // 0.1% steps put it within 0.1% of p.
-  const exact = e.mode !== "quantiles";
+  // A mark sits at the share of values at or below its value, counted in Go
+  // over every value. That share is not p: percentiles interpolate between
+  // values (2 of 3 lie at or below p99 at n = 3), and repeated values put
+  // several percentiles on one value with one share.
+  const counts = new Map(e.marks.map((c) => [c.p, c.atOrBelow]));
+  const n = data.stats.count;
   for (const m of marks) {
-    const atOrBelow = exact ? countAtOrBelow(v, m.value) : 0;
-    const share = exact ? atOrBelow / v.length : m.p / 100;
+    const atOrBelow = counts.get(m.p);
+    const share = atOrBelow / n;
     const cx = f.x(m.value);
     const cy = f.y(share);
     const label = svgText(markLayer, 0, 0, m.label, { class: "halo" });
@@ -1551,29 +1578,13 @@ function drawECDF({ el, data, width, motion }) {
       svgEl(leaders, "line", { class: "leader", x1: cx, y1: cy, x2: clamp(cx, lx, lx + w), y2: ly < cy ? ly + 2 : ly - 10 });
     }
     const dot = svgEl(markLayer, "circle", { class: "mark-dot", cx, cy, r: 3.5 });
-    const shareText = exact ? `${atOrBelow} of ${v.length} values lie at or below it` : `${formatValue(m.p)}% of the values lie at or below it`;
-    addTooltip(dot, [m.label, valueText(data, m.text), shareText]);
+    addTooltip(dot, [m.label, valueText(data, m.text), `${atOrBelow} of ${n} values lie at or below it`]);
   }
   fadeIn(motion, markLayer, 900);
   finishSvg(svg, width, finishPlot(el, svg, f, width, valueName(data)) + 2);
   if (e.mode === "quantiles") {
     showNote(el, `Drawn through ${v.length} quantiles at 0.1% steps of the ${data.stats.count} values.`);
   }
-}
-
-// Returns how many of the ascending values are at or below x.
-function countAtOrBelow(sorted, x) {
-  let lo = 0;
-  let hi = sorted.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (sorted[mid] <= x) {
-      lo = mid + 1;
-    } else {
-      hi = mid;
-    }
-  }
-  return lo;
 }
 
 // Draws the normal Q-Q plot: each order statistic against the standard

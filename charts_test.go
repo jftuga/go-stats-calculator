@@ -274,6 +274,59 @@ func TestECDFChart(t *testing.T) {
 	}
 }
 
+// TestECDFMarks checks the count of values at or below each mark against a
+// direct count, on both sides of the exact/quantile boundary, with repeated
+// values where every percentile shares one value and the share is far from p.
+func TestECDFMarks(t *testing.T) {
+	ties := func(zeros int) []float64 {
+		return append(make([]float64, zeros), 1)
+	}
+	for _, tc := range []struct {
+		name string
+		data []float64
+		mode string
+	}{
+		{"999 zeros and a one", ties(999), "exact"},
+		{"1000 zeros and a one", ties(1000), "quantiles"},
+		{"shuffled 5000", shuffledData(5000), "quantiles"},
+		{"shuffled 20", shuffledData(20), "exact"},
+	} {
+		s, err := computeStats(tc.data, []float64{10, 50, 90}, 1.5, 16, 0, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e := newChartData(tc.data, s).ECDF
+		if e == nil || e.Mode != tc.mode {
+			t.Fatalf("%s: ECDF %+v, want mode %s", tc.name, e, tc.mode)
+		}
+		values := map[float64]float64{10: s.CustomPercentiles[10], 25: s.Q1, 50: s.Median, 75: s.Q3, 90: s.CustomPercentiles[90], 95: s.P95, 99: s.P99}
+		var ps []float64
+		for _, m := range e.Marks {
+			ps = append(ps, m.P)
+			want := 0
+			for _, v := range tc.data {
+				if v <= values[m.P] {
+					want++
+				}
+			}
+			if m.AtOrBelow != want {
+				t.Errorf("%s: p%v has %d at or below, want %d", tc.name, m.P, m.AtOrBelow, want)
+			}
+		}
+		if !slices.Equal(ps, []float64{10, 25, 50, 75, 90, 95, 99}) {
+			t.Errorf("%s: mark percentiles %v", tc.name, ps)
+		}
+	}
+	for _, zeros := range []int{999, 1000} {
+		s, _ := computeStats(ties(zeros), nil, 1.5, 16, 0, 0, 0)
+		for _, m := range newChartData(ties(zeros), s).ECDF.Marks {
+			if m.AtOrBelow != zeros {
+				t.Errorf("%d zeros: p%v has %d at or below, want %d", zeros, m.P, m.AtOrBelow, zeros)
+			}
+		}
+	}
+}
+
 // TestQQChart checks the ranks, the order statistics and normal quantiles,
 // and the quartile reference points.
 func TestQQChart(t *testing.T) {

@@ -9,6 +9,7 @@
 package main
 
 import (
+	"cmp"
 	"math"
 	"slices"
 	"sort"
@@ -57,9 +58,19 @@ type trendlineChart struct {
 // (value i sits at cumulative fraction (i+1)/n); mode "quantiles" carries
 // 1,001 values, value i being the percentile i/1000 as calculatePercentile
 // computes it, so value 950 equals the reported p95.
+// Marks gives, for the ladder's percentiles and the median, how many of all
+// the values lie at or below each one's value; the page places and labels the
+// marks with these counts.
 type ecdfChart struct {
-	Mode   string    `json:"mode"`
-	Values []float64 `json:"values"`
+	Mode   string     `json:"mode"`
+	Values []float64  `json:"values"`
+	Marks  []ecdfMark `json:"marks"`
+}
+
+// ecdfMark is the count of values at or below percentile P's value.
+type ecdfMark struct {
+	P         float64 `json:"p"`
+	AtOrBelow int     `json:"atOrBelow"`
 }
 
 // qqChart pairs order statistics X with their standard normal quantiles Z,
@@ -137,6 +148,9 @@ func newChartData(data []float64, s *Stats) chartData {
 		Histogram: newHistogramChart(sorted),
 		ECDF:      newECDFChart(sorted),
 		Box:       newBoxChart(sorted, s.IQRMultiplier),
+	}
+	if charts.ECDF != nil {
+		charts.ECDF.Marks = ecdfMarks(sorted, s)
 	}
 	if !trimmed {
 		charts.Trendline = newTrendlineChart(data, s.EMASpan)
@@ -320,6 +334,22 @@ func emaSeries(data []float64, span int) []float64 {
 		series[i] = ema
 	}
 	return series
+}
+
+// ecdfMarks counts the values at or below each ladder percentile and the
+// median, the marks the ECDF chart draws, in ascending order of percentile.
+func ecdfMarks(sorted []float64, s *Stats) []ecdfMark {
+	values := map[float64]float64{50: s.Median}
+	for _, m := range ladderMarks(s) {
+		values[m.P] = m.Value
+	}
+	marks := make([]ecdfMark, 0, len(values))
+	for p, v := range values {
+		n := sort.Search(len(sorted), func(i int) bool { return sorted[i] > v })
+		marks = append(marks, ecdfMark{P: p, AtOrBelow: n})
+	}
+	slices.SortFunc(marks, func(a, b ecdfMark) int { return cmp.Compare(a.P, b.P) })
+	return marks
 }
 
 // newECDFChart returns every sorted value up to 1,000, otherwise the 1,001
