@@ -1983,3 +1983,256 @@ func TestJSONUnderTrimAndLogTransform(t *testing.T) {
 		t.Errorf("JSON geoMeanValid under -l: got %v, expected false", logged["geoMeanValid"])
 	}
 }
+
+// TestTextOutputGolden pins the complete text output for inputs that together
+// reach every row and every conditional branch of printStats. The expected
+// strings were produced by the build before printStats was split into shared
+// rows, so any change to the text output fails here.
+func TestTextOutputGolden(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  []string
+		stdin string
+		want  string
+	}{
+		{"all value rows", []string{"-z", "2", "-p", "10,99.5", "-t", "10", "-e", "5", "-k", "1"}, "5\n10\n15.5\n20\n25.00\n30\n35.0\n40\n45\n50\n55\n60\n65\n70\n75.25\n80\n85\n90\n95\n100\n12.5\n37.5\n62.50\n87.5\n50\n50\n50\n3\n150\n7.75\n42.0\nabc\n", `--- Descriptive Statistics ---
+Count:                31
+Skipped:              1 invalid line
+Distinct:             28 of 31 (9.6774% duplicated)
+Sum:                  1603.5
+Min:                  3
+Max:                  150
+
+--- Measures of Central Tendency ---
+Mean:                 51.7258
+Std Error:            6.0303
+95% CI (mean):        [39.9065, 63.5451]
+Geometric Mean:       38.2248
+Trimmed Mean (10%):   49.71
+EMA (span 5):         49.1489
+Median (p50):         50
+Mode:                 50
+
+--- Measures of Spread & Distribution ---
+Std Deviation:        33.5751
+Variance:             1127.2848
+MAD:                  37.065
+CV:                   64.9097% (High Variability)
+Quartile 1 (p25):     27.5
+Quartile 3 (p75):     72.625
+Percentile (p10):     10
+Percentile (p95):     97.5
+Percentile (p99):     135
+Percentile (p99.5):   142.5
+IQR:                  45.125
+Skewness:             0.7271 (Moderately Right Skewed)
+Kurtosis:             0.8884 (Mesokurtic - normal-like)
+Symmetry:             None
+Outliers:             [150]
+Z-Outliers (Z>2):     [150]
+Mod Z-Outliers (Z>2): [150]
+
+--- Distribution ---
+Histogram:            ▆▅▃▃▅█▅▃▃▃▃▁▁▁▁▂
+Trendline:            ▁▂▂▃▃▄▄▅▅▅▄▃▄▃▅▂
+Autocorrelation:      0.1289 (no serial dependence)
+Input Order:          unordered
+`},
+		{"ascending", []string{"-z", "2", "-e", "3"}, "1\n2\n3\n4\n5\n", `--- Descriptive Statistics ---
+Count:                5
+Distinct:             5 of 5 (0% duplicated)
+Sum:                  15
+Min:                  1
+Max:                  5
+
+--- Measures of Central Tendency ---
+Mean:                 3
+Std Error:            0.7071
+95% CI (mean):        [1.6141, 4.3859]
+Geometric Mean:       2.6052
+EMA (span 3):         4.0625
+Median (p50):         3
+Mode:                 None (modal bin: 1-1.8, 1 value)
+
+--- Measures of Spread & Distribution ---
+Std Deviation:        1.5811
+Variance:             2.5
+MAD:                  1.4826
+CV:                   52.7046% (High Variability)
+Quartile 1 (p25):     2
+Quartile 3 (p75):     4
+Percentile (p95):     4.8
+Percentile (p99):     4.96
+IQR:                  2
+Skewness:             0 (Fairly Symmetrical)
+Kurtosis:             -1.2 (Platykurtic - flat, thin tails)
+Symmetry:             Symmetric about 3 (2 pairs + center value)
+Outliers:             None
+Z-Outliers (Z>2):     None
+Mod Z-Outliers (Z>2): None
+
+--- Distribution ---
+Histogram:            █████
+Trendline:            ▁▃▅▆█
+Autocorrelation:      0.4 (weak positive serial dependence)
+Input Order:          ascending WARNING: trendline, autocorrelation, and EMA reflect this sort order, not a property of the data
+`},
+		{"multi mode", []string{"-z", "1"}, "1\n1\n2\n2\n3\n3\n9\n", `--- Descriptive Statistics ---
+Count:                7
+Distinct:             4 of 7 (42.8571% duplicated)
+Sum:                  21
+Min:                  1
+Max:                  9
+
+--- Measures of Central Tendency ---
+Mean:                 3
+Std Error:            1.0465
+95% CI (mean):        [0.9488, 5.0512]
+Geometric Mean:       2.2838
+Median (p50):         2
+Mode (multi):         [1 2 3]
+
+--- Measures of Spread & Distribution ---
+Std Deviation:        2.7689
+Variance:             7.6667
+MAD:                  1.4826
+CV:                   92.2958% (High Variability)
+Quartile 1 (p25):     1.5
+Quartile 3 (p75):     3
+Percentile (p95):     7.2
+Percentile (p99):     8.64
+IQR:                  1.5
+Skewness:             2.1764 (Highly Right Skewed)
+Kurtosis:             5.1595 (Leptokurtic - peaked, heavy tails)
+Symmetry:             None
+Outliers:             [9]
+Z-Outliers (Z>1):     [9]
+Mod Z-Outliers (Z>1): [9]
+
+--- Distribution ---
+Histogram:            █▄▁▁▁▁▂
+Trendline:            ▁▁▂▂▃▃█
+Autocorrelation:      0.1522 (no serial dependence)
+Input Order:          ascending WARNING: trendline and autocorrelation reflect this sort order, not a property of the data
+`},
+		{"mean near zero", []string{"-z", "2"}, "-1\n1\n", `--- Descriptive Statistics ---
+Count:                2
+Distinct:             2 of 2 (0% duplicated)
+Sum:                  0
+Min:                  -1
+Max:                  1
+
+--- Measures of Central Tendency ---
+Mean:                 0
+Std Error:            1
+95% CI (mean):        [-1.96, 1.96]
+Median (p50):         0
+Mode:                 None (modal bin: -1-0, 1 value)
+
+--- Measures of Spread & Distribution ---
+Std Deviation:        1.4142
+Variance:             2
+MAD:                  1.4826
+CV:                   N/A - mean near zero
+Quartile 1 (p25):     -0.5
+Quartile 3 (p75):     0.5
+Percentile (p95):     0.9
+Percentile (p99):     0.98
+IQR:                  1
+Skewness:             0 (Fairly Symmetrical)
+Kurtosis:             0 (Mesokurtic - normal-like)
+Symmetry:             N/A - requires at least 3 values
+Outliers:             None
+Z-Outliers (Z>2):     None
+Mod Z-Outliers (Z>2): None
+
+--- Distribution ---
+Histogram:            ██
+Trendline:            ▁█
+Input Order:          ascending WARNING: trendline and autocorrelation reflect this sort order, not a property of the data
+`},
+		{"zero spread", []string{"-z", "2"}, "5\n5\n5\n", `--- Descriptive Statistics ---
+Count:                3
+Distinct:             1 of 3 (66.6667% duplicated)
+Sum:                  15
+Min:                  5
+Max:                  5
+
+--- Measures of Central Tendency ---
+Mean:                 5
+Std Error:            0
+Geometric Mean:       5
+Median (p50):         5
+Mode:                 5
+
+--- Measures of Spread & Distribution ---
+Std Deviation:        0
+Variance:             0
+MAD:                  0
+CV:                   0% (Low Variability)
+Quartile 1 (p25):     5
+Quartile 3 (p75):     5
+Percentile (p95):     5
+Percentile (p99):     5
+IQR:                  0
+Skewness:             0 (Fairly Symmetrical)
+Kurtosis:             0 (Mesokurtic - normal-like)
+Symmetry:             Symmetric about 5 (1 pair + center value)
+Outliers:             None
+Z-Outliers (Z>2):     N/A - standard deviation is zero
+Mod Z-Outliers (Z>2): N/A - MAD is zero
+
+--- Distribution ---
+Input Order:          constant
+`},
+		{"trim and log", []string{"-T", "10", "-l"}, "5\n10\n15.5\n20\n25.00\n30\n35.0\n40\n45\n50\n55\n60\n65\n70\n75.25\n80\n85\n90\n95\n100\n12.5\n37.5\n62.50\n87.5\n50\n50\n50\n3\n150\n7.75\n42.0\n", `(log-transformed, base e)
+
+(trimmed dataset: 10% from each tail, 31 → 25 values)
+
+--- Descriptive Statistics ---
+Count:             25
+Distinct:          22 of 25 (12% duplicated)
+Sum:               94.0226
+Min:               2.3026
+Max:               4.4998
+
+--- Measures of Central Tendency ---
+Mean:              3.7609
+Std Error:         0.1211
+95% CI (mean):     [3.5236, 3.9982]
+Median (p50):      3.912
+Mode:              3.912
+
+--- Measures of Spread & Distribution ---
+Std Deviation:     0.6054
+Variance:          0.3666
+MAD:               0.4989
+CV:                16.0984% (Moderate Variability)
+Quartile 1 (p25):  3.5553
+Quartile 3 (p75):  4.1744
+Percentile (p95):  4.4658
+Percentile (p99):  4.493
+IQR:               0.619
+Skewness:          -1.0026 (Highly Left Skewed)
+Kurtosis:          0.3776 (Mesokurtic - normal-like)
+Symmetry:          None
+Outliers:          [2.3026 2.5257]
+
+--- Distribution ---
+Histogram:         ▂▂▁▂▁▂▂▁▂▄▆█▂▆▄█
+
+* all statistics above are computed on the trimmed dataset; compare against the full-data output
+`},
+	}
+	for _, tt := range tests {
+		cmd := exec.Command(statsBin, append(tt.args, "-")...)
+		cmd.Stdin = strings.NewReader(tt.stdin)
+		got, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("%s: run failed: %v", tt.name, err)
+		}
+		if string(got) != tt.want {
+			t.Errorf("%s: text output changed:\n--- got\n%s\n--- want\n%s", tt.name, got, tt.want)
+		}
+	}
+}

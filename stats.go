@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 )
@@ -21,7 +22,7 @@ const PgmUrl string = "https://github.com/jftuga/go-stats-calculator"
 const PgmDisclaimer string = "DISCLAIMER: This program is vibe-coded. Use at your own risk."
 const PgmSeeAlso string = "SEE ALSO: " + PgmUrl + "/tree/main?tab=readme-ov-file#testing-and-correctness"
 
-const PgmVersion string = "1.14.0"
+const PgmVersion string = "1.15.0"
 
 // madScale is the normal-consistency constant that makes the MAD directly
 // comparable to the standard deviation for normally distributed data.
@@ -125,6 +126,7 @@ func main() {
 	trimDatasetPct := flag.Float64("T", 0, "trim dataset: remove percentage from each tail before computing all statistics (0-50)")
 	emaSpan := flag.Int("e", 0, "EMA span (number of periods) for exponential moving average (>= 2)")
 	jsonOutput := flag.Bool("j", false, "emit results as JSON instead of formatted text")
+	htmlOutput := flag.Bool("html", false, "also write a standalone HTML report beside the input (stdin: stats--<timestamp>.html)")
 	flag.Parse()
 
 	// Handled before validation so the version is always reachable.
@@ -188,6 +190,28 @@ func main() {
 	if len(args) < 1 && inputIsTerminal {
 		flag.Usage()
 		os.Exit(0)
+	}
+
+	inputArg := ""
+	if len(args) == 1 {
+		inputArg = args[0]
+	}
+
+	// The report path is derived and checked before any input is read, so a
+	// refusal never follows a partially consumed stdin.
+	now := time.Now()
+	var htmlPath string
+	if *htmlOutput {
+		var err error
+		htmlPath, err = htmlOutputPath(inputArg, now)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := checkNotSameFile(inputArg, htmlPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	var reader io.Reader
@@ -271,6 +295,18 @@ func main() {
 		stats.GeoMeanValid = false
 	}
 
+	// The report is written before stdout, so a downstream "head" closing the
+	// pipe cannot prevent it, and a write failure never follows a full report.
+	// The note announcing it is deferred to follow the text or JSON output,
+	// after an empty line.
+	if *htmlOutput {
+		if err := writeHTMLReport(htmlPath, stats, numbers, inputArg, now, *numBins, *logTransform); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		defer fmt.Fprintf(os.Stderr, "\n%s\n", reportWrittenNote(htmlPath))
+	}
+
 	if *jsonOutput {
 		if err := printJSON(stats, *logTransform); err != nil {
 			fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
@@ -321,9 +357,16 @@ func main() {
 }
 
 // printJSON writes the statistics to stdout as an indented JSON object.
+func printJSON(s *Stats, logTransformed bool) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(newStatsOutput(s, logTransformed))
+}
+
+// newStatsOutput builds the JSON view of s shared by -j and the HTML report.
 // Outlier lists follow a two-state convention: an empty array means the detector
 // ran and found nothing, while null means it never ran.
-func printJSON(s *Stats, logTransformed bool) error {
+func newStatsOutput(s *Stats, logTransformed bool) statsOutput {
 	if s.Outliers == nil {
 		s.Outliers = []float64{}
 	}
@@ -346,10 +389,7 @@ func printJSON(s *Stats, logTransformed bool) error {
 			out.CustomPercentiles[formatFloat(k)] = v
 		}
 	}
-
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(out)
+	return out
 }
 
 // readNumbers reads floating-point numbers (one per line) from an io.Reader.
@@ -935,12 +975,24 @@ func interpretAutocorrelation(r float64) string {
 	return "strong " + direction + " serial dependence"
 }
 
+// Band thresholds for interpretSkewness, interpretKurtosis and interpretCV.
+// The report's gauges draw their bands from these, so a band always means
+// what the reading says.
+const (
+	skewModerate = 0.5
+	skewHigh     = 1.0
+	kurtosisLow  = -1.0
+	kurtosisHigh = 1.0
+	cvModerate   = 15.0
+	cvHigh       = 30.0
+)
+
 // interpretKurtosis provides a human-readable label for a kurtosis value.
 func interpretKurtosis(k float64) string {
-	if k < -1 {
+	if k < kurtosisLow {
 		return "Platykurtic - flat, thin tails"
 	}
-	if k <= 1 {
+	if k <= kurtosisHigh {
 		return "Mesokurtic - normal-like"
 	}
 	return "Leptokurtic - peaked, heavy tails"
@@ -948,10 +1000,10 @@ func interpretKurtosis(k float64) string {
 
 // interpretCV provides a human-readable label for a coefficient of variation value.
 func interpretCV(cv float64) string {
-	if cv < 15 {
+	if cv < cvModerate {
 		return "Low Variability"
 	}
-	if cv < 30 {
+	if cv < cvHigh {
 		return "Moderate Variability"
 	}
 	return "High Variability"
@@ -997,10 +1049,10 @@ func formatFloatSlice(values []float64) string {
 // interpretSkewness provides a human-readable label for a skewness value.
 func interpretSkewness(s float64) string {
 	absS := math.Abs(s)
-	if absS < 0.5 {
+	if absS < skewModerate {
 		return "Fairly Symmetrical"
 	}
-	if absS < 1.0 {
+	if absS < skewHigh {
 		if s > 0 {
 			return "Moderately Right Skewed"
 		}
@@ -1041,63 +1093,137 @@ func formatMode(s *Stats) string {
 	}
 }
 
-// printStats displays the results in a readable format.
-func printStats(s *Stats, labelWidth int) {
-	fmt.Println("--- Descriptive Statistics ---")
-	fmt.Printf("%s%d\n", padLabel("Count:", labelWidth), s.Count)
+// trimFootnote is printed after all sections when the dataset was trimmed with -T.
+const trimFootnote = "all statistics above are computed on the trimmed dataset; compare against the full-data output"
+
+// statRow is one labeled line of the text output. The HTML report renders the
+// same rows, so both outputs share labels, order, conditions and formatting.
+type statRow struct {
+	Kind    string    // identifies the statistic; selects the report's definition
+	Label   string    // label without the trailing colon
+	Value   string    // formatted value; unused when Values is non-empty
+	Reading string    // interpretation of the value, when Go has one apart from it
+	Values  []float64 // the full list for a list-valued row
+}
+
+// statSection is a titled group of rows, printed under a "--- Title ---" heading.
+type statSection struct {
+	Title string
+	Rows  []statRow
+}
+
+// text returns the row's value as the text output prints it: a list-valued row
+// is formatted in full, any other row uses its preformatted Value.
+func (r statRow) text() string {
+	if len(r.Values) > 0 {
+		return formatFloatSlice(r.Values)
+	}
+	return r.Value
+}
+
+// statSections builds every section of the output in display order. The
+// Distribution section is omitted when it would have no rows.
+func statSections(s *Stats) []statSection {
+	sections := []statSection{
+		{"Descriptive Statistics", descriptiveRows(s)},
+		{"Measures of Central Tendency", centralRows(s)},
+		{"Measures of Spread & Distribution", spreadRows(s)},
+	}
+	if rows := distributionRows(s); len(rows) > 0 {
+		sections = append(sections, statSection{"Distribution", rows})
+	}
+	return sections
+}
+
+// descriptiveRows builds the Descriptive Statistics rows.
+func descriptiveRows(s *Stats) []statRow {
+	rows := []statRow{{Kind: "count", Label: "Count", Value: strconv.Itoa(s.Count)}}
 	if s.SkippedLines > 0 {
 		lineWord := "lines"
 		if s.SkippedLines == 1 {
 			lineWord = "line"
 		}
-		fmt.Printf("%s%d invalid %s\n", padLabel("Skipped:", labelWidth), s.SkippedLines, lineWord)
+		rows = append(rows, statRow{Kind: "skipped", Label: "Skipped", Value: fmt.Sprintf("%d invalid %s", s.SkippedLines, lineWord)})
 	}
 	dupPct := float64(s.Count-s.Distinct) / float64(s.Count) * 100
-	fmt.Printf("%s%d of %d (%s%% duplicated)\n", padLabel("Distinct:", labelWidth), s.Distinct, s.Count, formatFloat(dupPct))
-	fmt.Printf("%s%s\n", padLabel("Sum:", labelWidth), formatFloat(s.Sum))
-	fmt.Printf("%s%s\n", padLabel("Min:", labelWidth), formatFloat(s.Min))
-	fmt.Printf("%s%s\n", padLabel("Max:", labelWidth), formatFloat(s.Max))
-	fmt.Println("\n--- Measures of Central Tendency ---")
-	fmt.Printf("%s%s\n", padLabel("Mean:", labelWidth), formatFloat(s.Mean))
-	fmt.Printf("%s%s\n", padLabel("Std Error:", labelWidth), formatFloat(s.StdErr))
+	return append(rows,
+		statRow{Kind: "distinct", Label: "Distinct", Value: fmt.Sprintf("%d of %d (%s%% duplicated)", s.Distinct, s.Count, formatFloat(dupPct))},
+		statRow{Kind: "sum", Label: "Sum", Value: formatFloat(s.Sum)},
+		statRow{Kind: "min", Label: "Min", Value: formatFloat(s.Min)},
+		statRow{Kind: "max", Label: "Max", Value: formatFloat(s.Max)},
+	)
+}
+
+// centralRows builds the Measures of Central Tendency rows.
+func centralRows(s *Stats) []statRow {
+	rows := []statRow{
+		{Kind: "mean", Label: "Mean", Value: formatFloat(s.Mean)},
+		{Kind: "stderr", Label: "Std Error", Value: formatFloat(s.StdErr)},
+	}
 	if s.CIValid {
-		ci := fmt.Sprintf("[%s, %s]", formatFloat(s.CI95Lower), formatFloat(s.CI95Upper))
-		fmt.Printf("%s%s\n", padLabel("95% CI (mean):", labelWidth), ci)
+		rows = append(rows, statRow{Kind: "ci95", Label: "95% CI (mean)", Value: fmt.Sprintf("[%s, %s]", formatFloat(s.CI95Lower), formatFloat(s.CI95Upper))})
 	}
 	if s.GeoMeanValid {
-		fmt.Printf("%s%s\n", padLabel("Geometric Mean:", labelWidth), formatFloat(s.GeometricMean))
+		rows = append(rows, statRow{Kind: "geomean", Label: "Geometric Mean", Value: formatFloat(s.GeometricMean)})
 	}
 	if s.TrimmedMeanPct > 0 {
-		label := fmt.Sprintf("Trimmed Mean (%s%%):", formatFloat(s.TrimmedMeanPct))
-		fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloat(s.TrimmedMean))
+		rows = append(rows, statRow{Kind: "trimmedmean", Label: fmt.Sprintf("Trimmed Mean (%s%%)", formatFloat(s.TrimmedMeanPct)), Value: formatFloat(s.TrimmedMean)})
 	}
 	if s.EMASpan > 0 {
-		label := fmt.Sprintf("EMA (span %d):", s.EMASpan)
-		fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloat(s.EMA))
+		rows = append(rows, statRow{Kind: "ema", Label: emaLabel(s.EMASpan), Value: formatFloat(s.EMA)})
 	}
-	fmt.Printf("%s%s\n", padLabel("Median (p50):", labelWidth), formatFloat(s.Median))
+	rows = append(rows, statRow{Kind: "median", Label: "Median (p50)", Value: formatFloat(s.Median)})
 
-	modeLabel := "Mode:"
+	mode := statRow{Kind: "mode", Label: "Mode"}
 	if len(s.Mode) > 1 {
-		modeLabel = "Mode (multi):"
-	}
-	fmt.Printf("%s%s\n", padLabel(modeLabel, labelWidth), formatMode(s))
-
-	fmt.Println("\n--- Measures of Spread & Distribution ---")
-	fmt.Printf("%s%s\n", padLabel("Std Deviation:", labelWidth), formatFloat(s.StdDev))
-	fmt.Printf("%s%s\n", padLabel("Variance:", labelWidth), formatFloat(s.Variance))
-	fmt.Printf("%s%s\n", padLabel("MAD:", labelWidth), formatFloat(s.MAD))
-	if !s.CVValid {
-		fmt.Printf("%s%s\n", padLabel("CV:", labelWidth), "N/A - mean near zero")
+		mode.Label = "Mode (multi)"
+		mode.Values = s.Mode
 	} else {
-		cvStr := fmt.Sprintf("%s%% (%s)", formatFloat(s.CV), interpretCV(s.CV))
-		if s.HasNegativeData {
-			cvStr += " WARNING: data set contains negative data"
-		}
-		fmt.Printf("%s%s\n", padLabel("CV:", labelWidth), cvStr)
+		mode.Value = formatMode(s)
 	}
-	fmt.Printf("%s%s\n", padLabel("Quartile 1 (p25):", labelWidth), formatFloat(s.Q1))
-	fmt.Printf("%s%s\n", padLabel("Quartile 3 (p75):", labelWidth), formatFloat(s.Q3))
+	return append(rows, mode)
+}
+
+// spreadRows builds the Measures of Spread & Distribution rows.
+func spreadRows(s *Stats) []statRow {
+	rows := []statRow{
+		{Kind: "stddev", Label: "Std Deviation", Value: formatFloat(s.StdDev)},
+		{Kind: "variance", Label: "Variance", Value: formatFloat(s.Variance)},
+		{Kind: "mad", Label: "MAD", Value: formatFloat(s.MAD)},
+	}
+	cv := statRow{Kind: "cv", Label: "CV", Value: "N/A - mean near zero"}
+	if s.CVValid {
+		cv.Reading = interpretCV(s.CV)
+		cv.Value = fmt.Sprintf("%s%% (%s)", formatFloat(s.CV), cv.Reading)
+		if s.HasNegativeData {
+			cv.Value += " WARNING: data set contains negative data"
+		}
+	}
+	rows = append(rows, cv,
+		statRow{Kind: "q1", Label: "Quartile 1 (p25)", Value: formatFloat(s.Q1)},
+		statRow{Kind: "q3", Label: "Quartile 3 (p75)", Value: formatFloat(s.Q3)},
+	)
+	rows = append(rows, percentileRows(s)...)
+	rows = append(rows,
+		statRow{Kind: "iqr", Label: "IQR", Value: formatFloat(s.IQR)},
+		statRow{Kind: "skewness", Label: "Skewness", Value: fmt.Sprintf("%s (%s)", formatFloat(s.Skewness), interpretSkewness(s.Skewness)), Reading: interpretSkewness(s.Skewness)},
+		statRow{Kind: "kurtosis", Label: "Kurtosis", Value: fmt.Sprintf("%s (%s)", formatFloat(s.Kurtosis), interpretKurtosis(s.Kurtosis)), Reading: interpretKurtosis(s.Kurtosis)},
+		statRow{Kind: "symmetry", Label: "Symmetry", Value: formatSymmetry(s)},
+		listRow("outliers", "Outliers", s.Outliers, true, ""),
+	)
+	if s.ZScoreThreshold > 0 {
+		threshold := formatFloat(s.ZScoreThreshold)
+		rows = append(rows,
+			listRow("zoutliers", "Z-Outliers (Z>"+threshold+")", s.ZScoreOutliers, s.ZScoreValid, "N/A - standard deviation is zero"),
+			listRow("modzoutliers", "Mod Z-Outliers (Z>"+threshold+")", s.ModZOutliers, s.ModZValid, "N/A - MAD is zero"),
+		)
+	}
+	return rows
+}
+
+// percentileRows builds one row per percentile, merging p95, p99 and any
+// custom percentiles into a single ascending sequence.
+func percentileRows(s *Stats) []statRow {
 	allPercentiles := map[float64]float64{95: s.P95, 99: s.P99}
 	for k, v := range s.CustomPercentiles {
 		allPercentiles[k] = v
@@ -1107,80 +1233,101 @@ func printStats(s *Stats, labelWidth int) {
 		pctKeys = append(pctKeys, k)
 	}
 	sort.Float64s(pctKeys)
-	for _, k := range pctKeys {
-		label := fmt.Sprintf("Percentile (p%s):", formatFloat(k))
-		fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloat(allPercentiles[k]))
+	rows := make([]statRow, len(pctKeys))
+	for i, k := range pctKeys {
+		rows[i] = statRow{Kind: "percentile", Label: fmt.Sprintf("Percentile (p%s)", formatFloat(k)), Value: formatFloat(allPercentiles[k])}
 	}
-	fmt.Printf("%s%s\n", padLabel("IQR:", labelWidth), formatFloat(s.IQR))
-	fmt.Printf("%s%s (%s)\n", padLabel("Skewness:", labelWidth), formatFloat(s.Skewness), interpretSkewness(s.Skewness))
-	fmt.Printf("%s%s (%s)\n", padLabel("Kurtosis:", labelWidth), formatFloat(s.Kurtosis), interpretKurtosis(s.Kurtosis))
-	symmetryStr := "N/A - requires at least 3 values"
-	if s.Count >= 3 {
-		if s.IsSymmetric {
-			pairWord := "pairs"
-			if s.SymmetryPairs == 1 {
-				pairWord = "pair"
-			}
-			symmetryStr = fmt.Sprintf("Symmetric about %s (%d %s", formatFloat(s.SymmetryCenter), s.SymmetryPairs, pairWord)
-			if s.Count%2 == 1 {
-				symmetryStr += " + center value"
-			}
-			symmetryStr += ")"
-		} else {
-			symmetryStr = "None"
-		}
+	return rows
+}
+
+// listRow builds an outlier row: naReason when the method could not run,
+// the full list when it found values, and "None" otherwise.
+func listRow(kind, label string, values []float64, valid bool, naReason string) statRow {
+	row := statRow{Kind: kind, Label: label}
+	switch {
+	case !valid:
+		row.Value = naReason
+	case len(values) > 0:
+		row.Values = values
+	default:
+		row.Value = "None"
 	}
-	fmt.Printf("%s%s\n", padLabel("Symmetry:", labelWidth), symmetryStr)
-	if len(s.Outliers) > 0 {
-		fmt.Printf("%s%s\n", padLabel("Outliers:", labelWidth), formatFloatSlice(s.Outliers))
-	} else {
-		fmt.Printf("%s%s\n", padLabel("Outliers:", labelWidth), "None")
+	return row
+}
+
+// formatSymmetry describes whether the data mirrors itself about a center value.
+func formatSymmetry(s *Stats) string {
+	if s.Count < 3 {
+		return "N/A - requires at least 3 values"
 	}
-	if s.ZScoreThreshold > 0 {
-		label := fmt.Sprintf("Z-Outliers (Z>%s):", formatFloat(s.ZScoreThreshold))
-		switch {
-		case !s.ZScoreValid:
-			fmt.Printf("%s%s\n", padLabel(label, labelWidth), "N/A - standard deviation is zero")
-		case len(s.ZScoreOutliers) > 0:
-			fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloatSlice(s.ZScoreOutliers))
-		default:
-			fmt.Printf("%s%s\n", padLabel(label, labelWidth), "None")
-		}
-		label = fmt.Sprintf("Mod Z-Outliers (Z>%s):", formatFloat(s.ZScoreThreshold))
-		switch {
-		case !s.ModZValid:
-			fmt.Printf("%s%s\n", padLabel(label, labelWidth), "N/A - MAD is zero")
-		case len(s.ModZOutliers) > 0:
-			fmt.Printf("%s%s\n", padLabel(label, labelWidth), formatFloatSlice(s.ModZOutliers))
-		default:
-			fmt.Printf("%s%s\n", padLabel(label, labelWidth), "None")
-		}
+	if !s.IsSymmetric {
+		return "None"
 	}
-	if s.Histogram != "" || s.Trendline != "" || s.AutocorrValid || s.InputOrder != "" {
-		fmt.Printf("\n--- Distribution ---\n")
-		if s.Histogram != "" {
-			fmt.Printf("%s%s\n", padLabel("Histogram:", labelWidth), s.Histogram)
+	pairWord := "pairs"
+	if s.SymmetryPairs == 1 {
+		pairWord = "pair"
+	}
+	symmetryStr := fmt.Sprintf("Symmetric about %s (%d %s", formatFloat(s.SymmetryCenter), s.SymmetryPairs, pairWord)
+	if s.Count%2 == 1 {
+		symmetryStr += " + center value"
+	}
+	return symmetryStr + ")"
+}
+
+// distributionRows builds the Distribution rows; each appears only when present.
+func distributionRows(s *Stats) []statRow {
+	var rows []statRow
+	if s.Histogram != "" {
+		rows = append(rows, statRow{Kind: "histogram", Label: "Histogram", Value: s.Histogram})
+	}
+	if s.Trendline != "" {
+		rows = append(rows, statRow{Kind: "trendline", Label: "Trendline", Value: s.Trendline})
+	}
+	if s.AutocorrValid {
+		reading := interpretAutocorrelation(s.Autocorrelation)
+		rows = append(rows, statRow{Kind: "autocorrelation", Label: "Autocorrelation", Value: fmt.Sprintf("%s (%s)", formatFloat(s.Autocorrelation), reading), Reading: reading})
+	}
+	if s.InputOrder != "" {
+		orderStr := s.InputOrder
+		if warning := sortOrderWarning(s); warning != "" {
+			orderStr += " WARNING: " + warning
 		}
-		if s.Trendline != "" {
-			fmt.Printf("%s%s\n", padLabel("Trendline:", labelWidth), s.Trendline)
+		rows = append(rows, statRow{Kind: "inputorder", Label: "Input Order", Value: orderStr})
+	}
+	return rows
+}
+
+// sortOrderWarning returns the warning printed after an ascending or
+// descending input order, or "" for any other order.
+func sortOrderWarning(s *Stats) string {
+	if s.InputOrder != "ascending" && s.InputOrder != "descending" {
+		return ""
+	}
+	// EMA is order-dependent too, so name it whenever it is on display.
+	affected := "trendline and autocorrelation"
+	if s.EMASpan > 0 {
+		affected = "trendline, autocorrelation, and EMA"
+	}
+	return affected + " reflect this sort order, not a property of the data"
+}
+
+// emaLabel is the EMA row's label for the given span.
+func emaLabel(span int) string {
+	return fmt.Sprintf("EMA (span %d)", span)
+}
+
+// printStats displays the results in a readable format.
+func printStats(s *Stats, labelWidth int) {
+	for i, section := range statSections(s) {
+		if i > 0 {
+			fmt.Println()
 		}
-		if s.AutocorrValid {
-			fmt.Printf("%s%s (%s)\n", padLabel("Autocorrelation:", labelWidth), formatFloat(s.Autocorrelation), interpretAutocorrelation(s.Autocorrelation))
-		}
-		if s.InputOrder != "" {
-			orderStr := s.InputOrder
-			if s.InputOrder == "ascending" || s.InputOrder == "descending" {
-				// EMA is order-dependent too, so name it whenever it is on display.
-				affected := "trendline and autocorrelation"
-				if s.EMASpan > 0 {
-					affected = "trendline, autocorrelation, and EMA"
-				}
-				orderStr += " WARNING: " + affected + " reflect this sort order, not a property of the data"
-			}
-			fmt.Printf("%s%s\n", padLabel("Input Order:", labelWidth), orderStr)
+		fmt.Printf("--- %s ---\n", section.Title)
+		for _, row := range section.Rows {
+			fmt.Printf("%s%s\n", padLabel(row.Label+":", labelWidth), row.text())
 		}
 	}
 	if s.TrimDatasetPct > 0 {
-		fmt.Println("\n* all statistics above are computed on the trimmed dataset; compare against the full-data output")
+		fmt.Println("\n* " + trimFootnote)
 	}
 }

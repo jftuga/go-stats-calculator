@@ -34,6 +34,8 @@ printf '%s\n' 10 20 30 40 50 | stats
 | `-t` | float | 0 | Trimmed mean percentage from each tail (0-50) |
 | `-T` | float | 0 | Trim dataset percentage from each tail before all stats (0-50) |
 | `-e` | int | 0 | EMA span for exponential moving average (>= 2 to enable) |
+| `-j` | bool | false | Emit results as JSON instead of formatted text |
+| `--html` | bool | false | Also write a standalone HTML report beside the input (stdin: `stats--<timestamp>.html` in the current directory) |
 
 **Note:** `-T` is mutually exclusive with both `-t` and `-e`.
 
@@ -61,6 +63,8 @@ printf '%s\n' 10 20 30 40 50 | stats
    - User has skewed data (file sizes, latencies, salaries) → suggest `-l` for log transform
    - User wants trend analysis → mention the trendline output and `-e` for EMA
    - User wants specific percentiles → use `-p "10,25,50,75,90"`
+   - User wants charts or a shareable visual report → add `--html` and tell them the report path from stderr
+   - User wants to script or parse the results → use `-j`
 
 2. **Preparing data for stats:**
    - Extract numeric columns from CSVs: `awk -F',' '{print $2}' data.csv | stats`
