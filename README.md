@@ -8,6 +8,12 @@ A robust, command-line tool written in Go to compute a comprehensive set of desc
 
 This program takes a simple, newline-delimited list of numbers (integers or floats) and calculates key statistical properties, including measures of central tendency (mean, median, mode), measures of spread (standard deviation, variance, IQR), the shape of the distribution (skewness, kurtosis, symmetry), plus robust measures (MAD, geometric mean, trimmed mean) and sequence properties (autocorrelation, input order). It also identifies outliers using three independent methods, and can emit everything as JSON for scripting.
 
+Excerpts from two reports made with [`--html`](#12-html-report). Click an image to see the full report.
+
+| [![Top of the HTML report for daily temperatures](docs/img/fairbanks_daily_temp_f.png)](docs/img/fairbanks_daily_temp_f_full.png) | [![HTML report histogram and trendline for server CPU utilization](docs/img/server_cpu_pct.png)](docs/img/server_cpu_pct_full.png) |
+|:---:|:---:|
+| 10 years of daily temperatures | 1 week of per-minute CPU utilization |
+
 ## Disclaimer
 
 This program was vibe-coded by `Gemini 2.5` Pro and `Opus 4.5`. As such, the author can't be held responsible for incorrect calculations. Please verify the results for any critical applications. That said, it has been validated through unit tests and independent verification. See [Testing and Correctness](#testing-and-correctness) for details.
@@ -482,8 +488,6 @@ cat data.txt | ./stats --html
 ./stats --html -l -z 2 -p "10,90" -e 20 latency.txt
 ./stats --html -j data.txt | jq '.p95'
 ```
-
-<!-- Screenshot placeholder: add a screenshot of a report here. -->
 
 **The output file:**
 
